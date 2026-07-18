@@ -1,0 +1,12 @@
+# Core — required to run host.py
+websocket-client>=1.6.0
+libcst>=1.8.6
+
+# Optional — psutil/paho-mqtt are import-guarded (tools/device_ns.py,
+# tools/exec_sys.py, tools/mqtt_ns.py); the agent runs fine without them.
+# psutil>=5.9
+# paho-mqtt>=1.6
+
+# Optional — only needed for the local voice bridge (scripts/hermes_k10_bridge.py)
+# httpx>=0.25
+# numpy>=1.24

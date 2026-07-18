@@ -1,0 +1,1565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>K10-Δ · Will Console v6.0</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #060a10; --panel: #0c121c; --panel2: #111a26; --border: #1a2a3d;
+      --text: #c8d6e3; --muted: #4e6278; --amber: #f0a500; --cyan: #00d4aa;
+      --rose: #ff4d6d; --violet: #7b6cff; --green: #00c853;
+      --glow-amber: rgba(240,165,0,0.12); --glow-cyan: rgba(0,212,170,0.10);
+      --font-display: 'Syne', sans-serif; --font-mono: 'IBM Plex Mono', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-mono); background: var(--bg); color: var(--text);
+      min-height: 100vh; font-size: 13px; line-height: 1.5;
+      background-image: radial-gradient(ellipse 80% 50% at 20% -10%, var(--glow-cyan), transparent),
+                        radial-gradient(ellipse 60% 40% at 90% 10%, var(--glow-amber), transparent);
+    }
+    .app { display: grid; grid-template-columns: 200px 1fr 280px; gap: 0; max-width: 1680px; margin: 0 auto; height: 100vh; }
+    @media (max-width: 1200px) { .app { grid-template-columns: 180px 1fr; } .sidebar-r { display: none; } }
+    @media (max-width: 800px) { .app { grid-template-columns: 1fr; } .sidebar-l { display: none; } }
+
+    /* Sidebar Left — Nav */
+    .sidebar-l {
+      background: var(--panel); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow-y: auto; padding: 0.75rem;
+    }
+    .brand { padding: 0.5rem 0.5rem 1rem; border-bottom: 1px solid var(--border); margin-bottom: 0.5rem; }
+    .brand h2 { font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; letter-spacing: -0.02em; }
+    .brand h2 span { color: var(--amber); }
+    .brand .ver { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+    .nav-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.55rem 0.6rem; border-radius: 3px; cursor: pointer;
+      font-size: 0.72rem; letter-spacing: 0.04em; color: var(--muted);
+      transition: all 0.12s; border: 1px solid transparent; margin-bottom: 1px;
+    }
+    .nav-item:hover { color: var(--text); background: var(--panel2); }
+    .nav-item.active { color: var(--cyan); background: rgba(0,212,170,0.06); border-color: rgba(0,212,170,0.15); }
+    .nav-pill { font-size: 0.6rem; padding: 0.1rem 0.35rem; border-radius: 2px; background: var(--panel2); color: var(--muted); }
+    .nav-pill.warn { background: rgba(255,77,109,0.12); color: var(--rose); }
+    .nav-pill.ok { background: rgba(0,200,83,0.12); color: var(--green); }
+    .nav-item.active .nav-pill { color: var(--cyan); background: rgba(0,212,170,0.10); }
+
+    /* Main Content */
+    .main { overflow-y: auto; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+      padding-bottom: 0.75rem; border-bottom: 1px solid var(--border);
+    }
+    .status-bar { display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); animation: pulse 2s infinite; }
+    .dot.warn { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+    .dot.off { background: var(--rose); box-shadow: none; animation: none; }
+    .tag {
+      display: inline-block; font-size: 0.62rem; padding: 0.15rem 0.45rem;
+      border-radius: 2px; border: 1px solid var(--border); color: var(--cyan); margin: 0.12rem;
+    }
+    .tag.warm { color: var(--amber); border-color: rgba(240,165,0,0.3); }
+    .tag.hot { color: var(--rose); border-color: rgba(255,77,109,0.3); }
+    .tag.muted { color: var(--muted); }
+    .tag-sm { font-size: 0.58rem; padding: 0.08rem 0.3rem; }
+    .tag-tier-core { color: var(--cyan); border-color: rgba(0,212,170,0.4); }
+    .tag-tier-domain { color: var(--amber); border-color: rgba(240,165,0,0.4); }
+    .tag-tier-rare { color: var(--muted); border-color: rgba(78,98,120,0.4); }
+
+    .btn {
+      background: transparent; border: 1px solid var(--amber); color: var(--amber);
+      font-family: var(--font-mono); font-size: 0.68rem; padding: 0.4rem 0.75rem;
+      cursor: pointer; border-radius: 3px; letter-spacing: 0.05em; text-transform: uppercase;
+      transition: all 0.12s; white-space: nowrap;
+    }
+    .btn:hover { background: var(--amber); color: var(--bg); }
+    .btn.cyan { border-color: var(--cyan); color: var(--cyan); }
+    .btn.cyan:hover { background: var(--cyan); color: var(--bg); }
+    .btn.rose { border-color: var(--rose); color: var(--rose); }
+    .btn.rose:hover { background: var(--rose); color: var(--bg); }
+    .btn.sm { font-size: 0.6rem; padding: 0.25rem 0.5rem; }
+    .btn-group { display: flex; gap: 0.35rem; }
+
+    /* Cards */
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 3px; padding: 0.85rem;
+    }
+    .card-head {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);
+    }
+    .card-head h3 { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+    @media (max-width: 1000px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+    input, textarea, select {
+      width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      font-family: var(--font-mono); font-size: 0.72rem; padding: 0.45rem 0.55rem;
+      border-radius: 3px; margin-bottom: 0.4rem;
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--cyan); }
+    pre {
+      background: var(--bg); border: 1px solid var(--border); padding: 0.75rem;
+      font-size: 0.68rem; overflow: auto; max-height: 350px; border-radius: 3px;
+      white-space: pre-wrap; word-break: break-word; line-height: 1.4;
+    }
+
+    /* Sparkline bars */
+    .sparkline { display: flex; align-items: flex-end; gap: 3px; height: 40px; }
+    .sparkline .bar { flex: 1; min-width: 6px; background: var(--cyan); border-radius: 1px; transition: height 0.3s; }
+    .sparkline .bar.low { background: var(--muted); }
+    .sparkline .bar.neg { background: var(--rose); }
+
+    /* Concepts */
+    .concepts { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
+    .concept-tag { font-size: 0.68rem; padding: 0.15rem 0.45rem; border-radius: 2px; border: 1px solid var(--border); }
+    .concept-tag.s1 { font-size: 0.62rem; opacity: 0.6; }
+    .concept-tag.s2 { font-size: 0.7rem; opacity: 0.8; }
+    .concept-tag.s3 { font-size: 0.82rem; color: var(--amber); font-weight: 600; }
+
+    /* Namespace grid */
+    .ns-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.5rem; }
+    .ns-card {
+      background: var(--panel2); border: 1px solid var(--border); padding: 0.6rem;
+      border-radius: 3px; cursor: pointer; transition: border-color 0.12s; position: relative;
+    }
+    .ns-card:hover { border-color: var(--cyan); }
+    .ns-card.selected { border-color: var(--amber); background: rgba(240,165,0,0.05); }
+    .ns-card .ns-name { font-family: var(--font-display); font-weight: 700; font-size: 0.78rem; color: var(--cyan); }
+    .ns-card .ns-info { font-size: 0.62rem; color: var(--muted); margin-top: 0.2rem; display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+    .tool-item {
+      padding: 0.45rem 0.65rem; border: 1px solid var(--border); margin-bottom: 0.3rem;
+      border-radius: 3px; cursor: pointer; font-size: 0.7rem; transition: all 0.1s;
+    }
+    .tool-item:hover { border-color: var(--violet); }
+    .tool-item .t-desc { color: var(--muted); font-size: 0.64rem; margin-top: 0.1rem; }
+
+    .filter-bar { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.6rem; align-items: center; }
+    .filter-chip {
+      padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: 2px;
+      font-size: 0.62rem; cursor: pointer; color: var(--muted); letter-spacing: 0.04em;
+      text-transform: uppercase; user-select: none;
+    }
+    .filter-chip.on { color: var(--cyan); border-color: var(--cyan); background: rgba(0,212,170,0.06); }
+
+    /* Episode */
+    .ep-item {
+      padding: 0.45rem 0; border-bottom: 1px solid var(--border);
+      cursor: pointer; font-size: 0.72rem; line-height: 1.4;
+    }
+    .ep-item .ep-meta { color: var(--muted); font-size: 0.64rem; }
+    .ep-detail { display: none; padding: 0.4rem 0.6rem; margin-top: 0.25rem; background: var(--bg); border-radius: 2px; font-size: 0.68rem; }
+    .ep-item.open .ep-detail { display: block; }
+
+    /* Goals */
+    .goal-item { padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.72rem; }
+    .goal-item .g-meta { font-size: 0.64rem; color: var(--muted); }
+
+    /* Sidebar Right */
+    .sidebar-r {
+      background: var(--panel); border-left: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow-y: auto; padding: 0.75rem; gap: 0.6rem;
+    }
+    .feed-item {
+      padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.66rem;
+    }
+    .feed-item .f-tool { color: var(--cyan); }
+    .feed-item .f-ok { color: var(--green); font-size: 0.6rem; }
+    .feed-item .f-err { color: var(--rose); font-size: 0.6rem; }
+    .feed-item .f-ts { color: var(--muted); font-size: 0.58rem; }
+
+    /* Log lines */
+    .log-line { font-size: 0.66rem; line-height: 1.45; color: var(--muted); }
+    .log-line.warn { color: var(--amber); }
+    .log-line.err { color: var(--rose); }
+    .log-line.info { color: var(--cyan); }
+    .highlight { background: rgba(240,165,0,0.2); }
+
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: var(--bg); } ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Sparklines & Gauges */
+    .sparkline { display: flex; align-items: flex-end; gap: 2px; height: 48px; }
+    .sparkline .bar { flex: 1; min-width: 4px; border-radius: 1px 1px 0 0; transition: height 0.4s ease; background: var(--cyan); }
+    .sparkline .bar.lo { background: var(--muted); }
+    .sparkline .bar.hi { background: var(--amber); }
+    .gauge { position: relative; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin: 0.3rem 0; }
+    .gauge-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+    .gauge-fill.cyan { background: var(--cyan); }
+    .gauge-fill.amber { background: var(--amber); }
+    .gauge-fill.rose { background: var(--rose); }
+    .gauge-fill.violet { background: var(--violet); }
+    .gauge-fill.green { background: var(--green); }
+    .live-counter { font-family: var(--font-display); font-size: 1.4rem; font-weight: 700; transition: color 0.3s; }
+    .live-counter.up { color: var(--green); }
+    .live-counter.down { color: var(--rose); }
+    .live-counter.steady { color: var(--text); }
+    .metric-row {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .metric-mini {
+      background: var(--panel2); border: 1px solid var(--border); border-radius: 3px;
+      padding: 0.5rem 0.6rem; text-align: center;
+    }
+    .metric-mini .m-val { font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; }
+    .metric-mini .m-label { font-size: 0.58rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 0.1rem; }
+    .metric-mini .m-delta { font-size: 0.6rem; margin-top: 0.1rem; }
+    .m-delta.up { color: var(--green); }
+    .m-delta.down { color: var(--rose); }
+    .heat-row { display: flex; gap: 2px; align-items: flex-end; height: 28px; margin-top: 0.3rem; }
+    .heat-row .h-bar { flex: 1; min-width: 3px; border-radius: 1px; opacity: 0.7; }
+    .heat-row .h-bar.h0 { background: var(--border); }
+    .heat-row .h-bar.h1 { background: var(--cyan); opacity: 0.4; }
+    .heat-row .h-bar.h2 { background: var(--cyan); opacity: 0.7; }
+    .heat-row .h-bar.h3 { background: var(--amber); opacity: 0.8; }
+    .pulse-badge {
+      display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.62rem;
+      padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border);
+    }
+    .pulse-badge.ok { border-color: var(--green); color: var(--green); }
+    .pulse-badge.warn { border-color: var(--amber); color: var(--amber); }
+    .pulse-badge.err { border-color: var(--rose); color: var(--rose); }
+    .pulse-dot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+    .pulse-dot.ok { background: var(--green); box-shadow: 0 0 4px var(--green); animation: pulse 2s infinite; }
+    .pulse-dot.warn { background: var(--amber); box-shadow: 0 0 4px var(--amber); animation: pulse 1.5s infinite; }
+    .pulse-dot.err { background: var(--rose); box-shadow: 0 0 4px var(--rose); animation: pulse 1s infinite; }
+
+    /* Charts */
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.75rem; }
+    .donut-wrap { display: flex; align-items: center; gap: 0.75rem; }
+    .donut {
+      width: 90px; height: 90px; border-radius: 50%;
+      position: relative; flex-shrink: 0;
+      background: conic-gradient(var(--cyan) 0% 35%, var(--amber) 35% 65%, var(--violet) 65% 85%, var(--rose) 85% 100%);
+    }
+    .donut::after {
+      content: ''; position: absolute; inset: 22px; border-radius: 50%; background: var(--panel);
+    }
+    .donut-center {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-display); font-size: 0.9rem; font-weight: 700; z-index: 1;
+    }
+    .chart-legend { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.64rem; }
+    .chart-legend .row { display: flex; align-items: center; gap: 0.4rem; }
+    .swatch { width: 8px; height: 8px; border-radius: 2px; }
+    .hbar { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0; font-size: 0.64rem; }
+    .hbar-track { flex: 1; height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+    .hbar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+    .timeline { display: flex; align-items: flex-end; gap: 1px; height: 60px; }
+    .timeline .t-bar { flex: 1; min-width: 3px; border-radius: 1px 1px 0 0; opacity: 0.85; }
+    .timeline-legend { display: flex; gap: 0.5rem; font-size: 0.6rem; margin-top: 0.3rem; flex-wrap: wrap; }
+    .mini-kpi { text-align: center; padding: 0.4rem; background: var(--panel2); border: 1px solid var(--border); border-radius: 3px; }
+    .mini-kpi .k-val { font-family: var(--font-display); font-size: 1rem; font-weight: 700; }
+    .mini-kpi .k-lbl { font-size: 0.58rem; color: var(--muted); text-transform: uppercase; }
+    .heatmap-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; }
+    .heatmap-grid .hx { aspect-ratio: 1; border-radius: 2px; }
+    .rank-list { font-size: 0.66rem; }
+    .rank-list .r-item { display: flex; justify-content: space-between; padding: 0.15rem 0; border-bottom: 1px solid var(--border); }
+    .rank-list .r-item:last-child { border-bottom: none; }
+    .rank-list .r-name { color: var(--cyan); }
+
+    /* Chat */
+    .chat-messages { display: flex; flex-direction: column; gap: 0.5rem; }
+    .chat-bubble { max-width: 75%; padding: 0.55rem 0.75rem; border-radius: 4px; font-size: 0.74rem; line-height: 1.45; }
+    .chat-bubble.user { align-self: flex-end; background: rgba(0,212,170,0.1); border: 1px solid rgba(0,212,170,0.25); }
+    .chat-bubble.agent { align-self: flex-start; background: var(--panel2); border: 1px solid var(--border); }
+    .chat-meta { font-size: 0.6rem; color: var(--muted); margin-bottom: 0.15rem; }
+
+    /* Workflow builder */
+    .wf-step { background: var(--panel2); border: 1px solid var(--border); border-radius: 3px; padding: 0.55rem; margin-bottom: 0.4rem; }
+    .wf-step input { margin-bottom: 0.3rem; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar Left -->
+  <aside class="sidebar-l" id="left-nav">
+    <div class="brand"><h2>K10<span>-Δ</span></h2><div class="ver">Will Console v6.0</div></div>
+    <div class="nav-item active" data-panel="overview">Overview <span class="nav-pill" id="pill-overview">—</span></div>
+    <div class="nav-item" data-panel="analytics">Analytics <span class="nav-pill" id="pill-analytics">—</span></div>
+    <div class="nav-item" data-panel="tools">Tool Index <span class="nav-pill" id="pill-tools">—</span></div>
+    <div class="nav-item" data-panel="workflows">Workflows <span class="nav-pill" id="pill-workflows">—</span></div>
+    <div class="nav-item" data-panel="chat">Chat <span class="nav-pill" id="pill-chat">●</span></div>
+    <div class="nav-item" data-panel="console">Tool Console</div>
+    <div class="nav-item" data-panel="episodes">Episodes <span class="nav-pill" id="pill-episodes">—</span></div>
+    <div class="nav-item" data-panel="hypotheses">Hypotheses <span class="nav-pill" id="pill-hypotheses">—</span></div>
+    <div class="nav-item" data-panel="axioms">Axioms <span class="nav-pill" id="pill-axioms">—</span></div>
+    <div class="nav-item" data-panel="identity">Identity & Goals</div>
+    <div class="nav-item" data-panel="health">Health <span class="nav-pill" id="pill-health">—</span></div>
+    <div class="nav-item" data-panel="will">Will <span class="nav-pill" id="pill-will">—</span></div>
+    <div class="nav-item" data-panel="creator">Creator</div>
+    <div class="nav-item" data-panel="log">Host Log</div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main" id="main-content">
+
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="status-bar"><div class="dot" id="live-dot"></div><span id="status-text">connecting…</span></div>
+      <div class="btn-group">
+        <button class="btn cyan sm" onclick="apiPost('/api/reflect',{})" title="Force reflection cycle">Reflect</button>
+        <button class="btn sm" onclick="apiPost('/api/dream',{})" title="Force dream cycle">Dream</button>
+        <button class="btn cyan sm" onclick="apiPost('/api/pursue',{})">Pursue</button>
+        <button class="btn sm" style="border-color:var(--muted);color:var(--muted)" onclick="toggleAutoRefresh()" id="btn-refresh">⏻ Auto</button>
+      </div>
+    </div>
+
+    <!-- PANELS -->
+    <div class="panel-content" id="panel-overview"></div>
+    <div class="panel-content" id="panel-analytics" style="display:none"></div>
+    <div class="panel-content" id="panel-tools" style="display:none"></div>
+    <div class="panel-content" id="panel-workflows" style="display:none"></div>
+    <div class="panel-content" id="panel-chat" style="display:none"></div>
+    <div class="panel-content" id="panel-console" style="display:none"></div>
+    <div class="panel-content" id="panel-episodes" style="display:none"></div>
+    <div class="panel-content" id="panel-hypotheses" style="display:none"></div>
+    <div class="panel-content" id="panel-axioms" style="display:none"></div>
+    <div class="panel-content" id="panel-identity" style="display:none"></div>
+    <div class="panel-content" id="panel-health" style="display:none"></div>
+    <div class="panel-content" id="panel-will" style="display:none"></div>
+    <div class="panel-content" id="panel-creator" style="display:none"></div>
+    <div class="panel-content" id="panel-log" style="display:none"></div>
+  </main>
+
+  <!-- Sidebar Right — Live Feed -->
+  <aside class="sidebar-r" id="right-sidebar">
+    <div class="card" style="padding:0.5rem">
+      <div class="card-head" style="margin-bottom:0.3rem;padding-bottom:0.3rem"><h3>Live Feed</h3><span style="font-size:0.6rem;color:var(--muted)" id="feed-count">0</span></div>
+      <div id="live-feed" style="max-height:240px;overflow-y:auto"></div>
+    </div>
+    <div class="card" style="padding:0.5rem">
+      <div class="card-head" style="margin-bottom:0.3rem;padding-bottom:0.3rem"><h3>Will Pulse</h3></div>
+      <div id="will-pulse" style="font-size:0.66rem;color:var(--muted)">—</div>
+    </div>
+    <div class="card" style="padding:0.5rem">
+      <div class="card-head" style="margin-bottom:0.3rem;padding-bottom:0.3rem"><h3>Goal Pulse</h3></div>
+      <div id="goal-pulse" style="display:flex;gap:0.4rem;flex-wrap:wrap"></div>
+    </div>
+    <div class="card" style="padding:0.5rem">
+      <div class="card-head" style="margin-bottom:0.3rem;padding-bottom:0.3rem"><h3>Top Tools</h3></div>
+      <div id="top-tools-mini"></div>
+    </div>
+    <div class="card" style="padding:0.5rem">
+      <div class="card-head" style="margin-bottom:0.3rem;padding-bottom:0.3rem"><h3>Warnings</h3></div>
+      <div id="warnings-mini" style="font-size:0.66rem;color:var(--muted)">—</div>
+    </div>
+    <div class="card" style="padding:0.5rem">
+      <div class="card-head" style="margin-bottom:0.3rem;padding-bottom:0.3rem"><h3>Recent Errors</h3></div>
+      <div id="recent-errors-mini" style="font-size:0.64rem;color:var(--muted)">—</div>
+    </div>
+    <div class="card" style="padding:0.5rem">
+      <div class="card-head" style="margin-bottom:0.3rem;padding-bottom:0.3rem"><h3>Quick Add Goal</h3></div>
+      <input id="quick-goal" placeholder="What to pursue…" style="margin-bottom:0.3rem" />
+      <button class="btn cyan sm" onclick="quickAddGoal()">Add</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+const API = '';
+let state = { toolIndex: null, status: null, health: null, autoRefresh: true, streamLog: false };
+let selectedNs = null;
+
+async function apiGet(path) { const r = await fetch(API+path); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+async function apiPost(path, body) {
+  const r = await fetch(API+path, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  if(!r.ok) throw new Error(await r.text()); return r.json();
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtTime(s) { if(s<60) return s+'s'; if(s<3600) return Math.floor(s/60)+'m'; return (s/3600).toFixed(1)+'h'; }
+function relTime(ts) {
+  if(!ts) return '—';
+  try { const d = (Date.now() - new Date(ts.replace('Z','+00:00')).getTime())/1000;
+    if(d<60) return 'now'; if(d<3600) return Math.floor(d/60)+'m ago';
+    if(d<86400) return Math.floor(d/3600)+'h ago'; return Math.floor(d/86400)+'d ago'; }
+  catch(e) { return ts.slice(0,16); }
+}
+
+// Nav
+document.querySelectorAll('#left-nav .nav-item').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#left-nav .nav-item').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelectorAll('.panel-content').forEach(p => p.style.display = 'none');
+    const el = document.getElementById('panel-' + b.dataset.panel);
+    if(el) el.style.display = '';
+    onPanelSwitch(b.dataset.panel);
+  });
+});
+
+function onPanelSwitch(panel) {
+  if(panel==='analytics') loadAnalytics();
+  if(panel==='tools') loadToolIndex();
+  if(panel==='chat') loadChat();
+  if(panel==='workflows') loadWorkflows();
+  if(panel==='episodes') loadEpisodes();
+  if(panel==='hypotheses') loadHypotheses();
+  if(panel==='axioms') loadAxioms();
+  if(panel==='identity') { loadIdentity(); loadGoals(); }
+  if(panel==='health') loadHealth();
+  if(panel==='will' || panel==='autonomy') loadWill();
+  if(panel==='creator') loadFeedback();
+  if(panel==='log') loadLog();
+}
+
+// ── Overview ──────────────────────────────────────────────────────────
+let _metricsHistory = JSON.parse(sessionStorage.getItem('k10-metrics')||'[]');
+let _lastEpisodeCount = 0, _lastToolCount = 0;
+
+function renderOverview(s) {
+  let html = '';
+  const li = s.last_intention || {};
+  html += '<div class="metric-row">';
+  html += metricCard('episodes', s.episode_count||0, 'Episodes', _delta(s.episode_count, _lastEpisodeCount));
+  html += metricCard('tools', s.tool_count||0, 'Tools', 0);
+  html += metricCard('reflections', s.reflection_cycles||0, 'Reflections', 0);
+  html += metricCard('goals', s.active_goals||s.open_goals||0, 'Active Goals', 0);
+  html += metricCard('hypos', s.open_hypotheses||0, 'Hypotheses', 0);
+  html += '</div>';
+
+  // Will strip — primary aliveness surface
+  html += '<div class="card" style="border-left:3px solid var(--cyan)">';
+  html += '<div class="card-head"><h3>Will</h3>';
+  html += s.will_enabled===false
+    ? '<span class="tag tag-sm hot">disabled</span>'
+    : '<span class="tag tag-sm" style="color:var(--green);border-color:rgba(0,200,83,0.4)">enabled</span>';
+  if(li.kind) html += '<span class="tag tag-sm warm">'+esc(li.kind)+'</span>';
+  if(s.last_tick_cycle!=null) html += '<span class="tag tag-sm">cycle '+s.last_tick_cycle+'</span>';
+  html += '</div>';
+  if(li.kind && li.kind!=='none') {
+    html += '<div style="font-size:0.82rem;margin-bottom:0.35rem">'+esc(li.text||'')+'</div>';
+    html += '<div style="font-size:0.64rem;color:var(--muted)">';
+    if(li.tool) html += 'tool <span class="tag tag-sm">'+esc(li.tool)+'</span> ';
+    if(li.goal_id) html += 'goal <span class="tag tag-sm">'+esc(li.goal_id)+'</span> ';
+    const ratio = s.outward_act_ratio;
+    html += 'outward '+(ratio==null?'—':ratio);
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:0.68rem;color:var(--muted)">No intention yet — reflection cycle will form one</div>';
+  }
+  html += '</div>';
+
+  html += '<div class="grid-2">';
+  html += '<div class="card"><div class="card-head"><h3>Trajectory Score</h3><span class="tag warm" id="traj-label">'+(s.trajectory?.label||'—')+'</span></div>';
+  html += '<div class="sparkline" id="traj-sparkline"></div>';
+  html += '<div style="font-size:0.64rem;color:var(--muted);margin-top:0.25rem" id="traj-score-text">score: '+((s.trajectory?.score??0).toFixed(3))+'</div></div>';
+  html += '<div class="card"><div class="card-head"><h3>Tool Call Rate</h3><span id="tool-rate-label" style="font-size:0.7rem;color:var(--cyan)">—/min</span></div>';
+  html += '<div class="heat-row" id="tool-heat"></div>';
+  html += '<div style="font-size:0.64rem;color:var(--muted);margin-top:0.2rem" id="tool-rate-detail">last 5m: —</div></div>';
+  html += '<div class="card"><div class="card-head"><h3>System Memory</h3></div>';
+  html += '<div style="font-size:0.7rem"><span id="mem-val">—</span> MB</div>';
+  html += '<div class="gauge"><div class="gauge-fill cyan" id="mem-gauge" style="width:0%"></div></div></div>';
+  html += '<div class="card"><div class="card-head"><h3>Errors (5m)</h3></div>';
+  html += '<div style="font-size:1.2rem;font-family:var(--font-display);font-weight:700" id="err-count">0</div>';
+  html += '<div class="gauge"><div class="gauge-fill rose" id="err-gauge" style="width:0%"></div></div></div>';
+  html += '<div class="card"><div class="card-head"><h3>Health</h3></div>';
+  html += '<div id="health-badges" style="display:flex;gap:0.3rem;flex-wrap:wrap">';
+  html += '<span class="pulse-badge ok" id="hb-threads"><span class="pulse-dot ok"></span> threads —</span>';
+  html += '<span class="pulse-badge ok" id="hb-zombies"><span class="pulse-dot ok"></span> zombies 0</span>';
+  html += '<span class="pulse-badge ok" id="hb-hermes"><span class="pulse-dot ok"></span> hermes —</span>';
+  html += '<span class="pulse-badge ok" id="hb-will"><span class="pulse-dot ok"></span> will —</span>';
+  html += '</div></div>';
+  html += '<div class="card"><div class="card-head"><h3>Top Namespaces</h3></div>';
+  html += '<div id="top-ns-mini">' + renderTopNsMini(s) + '</div></div>';
+  html += '<div class="card" style="grid-column:1/-1"><div class="card-head"><h3>Concepts</h3></div>';
+  html += '<div class="concepts" id="concepts-cloud">';
+  const concepts = s.top_concepts || s.rising_concepts || [];
+  concepts.forEach((c,i) => {
+    let sz = 's1'; if(i<5) sz='s3'; else if(i<10) sz='s2';
+    html += '<span class="concept-tag '+sz+'">'+esc(c)+'</span>';
+  });
+  html += concepts.length?'':'<span class="concept-tag s1">no concepts yet</span>';
+  html += '</div></div></div>';
+  _lastEpisodeCount = s.episode_count||0;
+  return html;
+}
+function metricCard(id, val, label, delta, isTime) {
+  let v = isTime ? fmtTime(val) : String(val);
+  let dc = 'steady';
+  if(delta>0) dc='up'; else if(delta<0) dc='down';
+  return '<div class="metric-mini"><div class="live-counter '+dc+'" id="mc-'+id+'">'+v+'</div><div class="m-label">'+label+'</div></div>';
+}
+function renderTopNsMini(s) {
+  const counts = s.namespace_counts || {};
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const max = Math.max(...entries.map(e=>e[1]), 1);
+  if(!entries.length) return '<div style="color:var(--muted);font-size:0.64rem">No data</div>';
+  return entries.map(([ns,n],i) => `<div class="hbar" style="margin:0.15rem 0"><span style="width:70px;font-size:0.62rem">${esc(ns)}</span><div class="hbar-track"><div class="hbar-fill" style="width:${(n/max*100).toFixed(1)}%;background:var(--cyan)"></div></div><span style="width:24px;text-align:right;font-size:0.62rem">${n}</span></div>`).join('');
+}
+function _delta(cur, prev) { return prev ? cur - prev : 0; }
+
+// ── Analytics ──────────────────────────────────────────────────────────
+let _analyticsCache = {};
+async function loadAnalytics() {
+  const el = document.getElementById('panel-analytics');
+  if(!el || el.style.display==='none') return;
+  try {
+    const [tools, goals, hypos, eps] = await Promise.all([
+      apiGet('/api/tools'),
+      apiGet('/api/goals'),
+      apiGet('/api/hypotheses'),
+      apiGet('/api/episodes?n=200')
+    ]);
+    _analyticsCache = { tools, goals, hypos, eps };
+    el.innerHTML = renderAnalytics(tools, goals, hypos, eps);
+  } catch(e) {
+    el.innerHTML = '<div class="card"><div style="color:var(--muted)">Analytics unavailable</div></div>';
+  }
+}
+
+function renderAnalytics(tools, goals, hypos, eps) {
+  const ns = tools.namespaces || {};
+  const nsEntries = Object.entries(ns).map(([name, data]) => ({ name, count: Object.keys(data.tools||{}).length })).sort((a,b)=>b.count-a.count);
+  const totalTools = nsEntries.reduce((a,b)=>a+b.count,0);
+  const tierCounts = { core:0, domain:0, rare:0 };
+  nsEntries.forEach(n => Object.values(ns[n.name].tools||{}).forEach(t => { tierCounts[t.tier||'domain'] = (tierCounts[t.tier||'domain']||0)+1; }));
+
+  const sourceCounts = {};
+  eps.forEach(e => { sourceCounts[e.source||'other'] = (sourceCounts[e.source||'other']||0)+1; });
+
+  const goalStatus = {};
+  goals.forEach(g => { goalStatus[g.status||'open'] = (goalStatus[g.status||'open']||0)+1; });
+
+  const hypoStatus = {};
+  hypos.forEach(h => { hypoStatus[h.status||'open'] = (hypoStatus[h.status||'open']||0)+1; });
+  const confBuckets = [0,0,0,0,0];
+  hypos.forEach(h => { const c = h.confidence||0; const i = Math.min(4, Math.floor(c*5)); confBuckets[i]++; });
+
+  const topErrorTools = (state.status?.tool_usage?.error_tools || []).slice(0,5);
+
+  // Namespace donut slices
+  const colors = ['var(--cyan)','var(--amber)','var(--violet)','var(--rose)','var(--green)'];
+  let acc = 0;
+  const slices = nsEntries.slice(0,8).map((n,i) => { const pct = n.count/totalTools; const start = acc; acc += pct; return { ...n, start, end: acc, color: colors[i%colors.length] }; });
+  const conic = slices.length ? slices.map(s => `${s.color} ${(s.start*100).toFixed(2)}% ${(s.end*100).toFixed(2)}%`).join(', ') : 'var(--border) 0% 100%';
+
+  let html = '<div class="chart-grid">';
+
+  // Namespace donut
+  html += '<div class="card"><div class="card-head"><h3>Tool Namespace Distribution</h3><span style="font-size:0.6rem;color:var(--muted)">'+totalTools+' tools</span></div>';
+  html += '<div class="donut-wrap"><div class="donut" style="background:conic-gradient('+conic+')"><div class="donut-center">'+nsEntries.length+'</div></div>';
+  html += '<div class="chart-legend">'+slices.map(s => `<div class="row"><span class="swatch" style="background:${s.color}"></span><span>${esc(s.name)} · ${s.count}</span></div>`).join('')+'</div></div></div>';
+
+  // Tier bars
+  html += '<div class="card"><div class="card-head"><h3>Tier Distribution</h3></div>';
+  html += hbar('Core', tierCounts.core, totalTools, 'var(--cyan)');
+  html += hbar('Domain', tierCounts.domain, totalTools, 'var(--amber)');
+  html += hbar('Rare', tierCounts.rare, totalTools, 'var(--muted)');
+  html += '</div>';
+
+  // Episode source donut
+  html += '<div class="card"><div class="card-head"><h3>Episode Sources</h3><span style="font-size:0.6rem;color:var(--muted)">'+eps.length+' episodes</span></div>';
+  const srcEntries = Object.entries(sourceCounts).sort((a,b)=>b[1]-a[1]);
+  const srcTotal = eps.length||1;
+  let srcAcc = 0;
+  const srcColors = { tool:'var(--cyan)', cognition:'var(--violet)', dream:'var(--amber)', memory:'var(--green)', will:'var(--rose)', autonomy:'var(--rose)', other:'var(--muted)' };
+  const srcSlices = srcEntries.map(([name,count],i) => { const pct = count/srcTotal; const start = srcAcc; srcAcc += pct; return { name, count, start, end: srcAcc, color: srcColors[name] || colors[i%colors.length] }; });
+  const srcConic = srcSlices.length ? srcSlices.map(s => `${s.color} ${(s.start*100).toFixed(2)}% ${(s.end*100).toFixed(2)}%`).join(', ') : 'var(--border) 0% 100%';
+  html += '<div class="donut-wrap"><div class="donut" style="background:conic-gradient('+srcConic+')"><div class="donut-center">'+srcEntries.length+'</div></div>';
+  html += '<div class="chart-legend">'+srcSlices.map(s => `<div class="row"><span class="swatch" style="background:${s.color}"></span><span>${esc(s.name)} · ${s.count}</span></div>`).join('')+'</div></div></div>';
+
+  // Goal status
+  html += '<div class="card"><div class="card-head"><h3>Goal Status</h3><span style="font-size:0.6rem;color:var(--muted)">'+goals.length+' goals</span></div>';
+  const gTotal = goals.length||1;
+  html += hbar('Open', goalStatus.open||0, gTotal, 'var(--cyan)');
+  html += hbar('In Progress', goalStatus.in_progress||0, gTotal, 'var(--amber)');
+  html += hbar('Stalled', goalStatus.stalled||0, gTotal, 'var(--rose)');
+  html += hbar('Done', goalStatus.done||0, gTotal, 'var(--green)');
+  html += '</div>';
+
+  // Hypothesis confidence histogram
+  html += '<div class="card"><div class="card-head"><h3>Hypothesis Confidence</h3><span style="font-size:0.6rem;color:var(--muted)">'+hypos.length+' hypos</span></div>';
+  const labels = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%'];
+  const hMax = Math.max(...confBuckets, 1);
+  html += '<div class="timeline" style="height:80px;gap:4px">'+confBuckets.map((c,i) => `<div class="t-bar" style="height:${(c/hMax*100).toFixed(1)}%;background:${colors[i%colors.length]}" title="${labels[i]}: ${c}"></div>`).join('')+'</div>';
+  html += '<div class="timeline-legend">'+labels.map((l,i)=>`<span><span class="swatch" style="background:${colors[i%colors.length]}"></span> ${l}</span>`).join('')+'</div></div>';
+
+  // Namespace heatmap
+  html += '<div class="card"><div class="card-head"><h3>Namespace Heat</h3></div>';
+  const nsHeat = state.status?.tool_usage?.namespace_heat || [];
+  const heatEntries = Array.isArray(nsHeat) ? nsHeat : Object.entries(nsHeat);
+  const heatMax = Math.max(...heatEntries.map(e => Array.isArray(e) ? e[1] : e.count), 1);
+  html += '<div class="rank-list">'+heatEntries.slice(0,8).map(e => {
+    const name = Array.isArray(e) ? e[0] : e.namespace;
+    const count = Array.isArray(e) ? e[1] : e.count;
+    return `<div class="r-item"><span class="r-name">${esc(name)}</span><span style="color:${count>heatMax*0.6?'var(--amber)':'var(--cyan)'}">${count}</span></div>`;
+  }).join('')+'</div></div>';
+
+  // Error tools
+  html += '<div class="card"><div class="card-head"><h3>Top Error Tools</h3></div>';
+  if(topErrorTools.length) {
+    html += '<div class="rank-list">'+topErrorTools.map(t => `<div class="r-item"><span class="r-name">${esc(t.tool||t[0])}</span><span>${t.count??t[1]}</span></div>`).join('')+'</div>';
+  } else {
+    html += '<div style="color:var(--muted);font-size:0.66rem">No tool errors recorded</div>';
+  }
+  html += '</div>';
+
+  // Trajectory history
+  html += '<div class="card" style="grid-column:1/-1"><div class="card-head"><h3>Trajectory History</h3></div>';
+  const trajHist = _metricsHistory.map(h => h.trajectory_score).filter(v => v != null);
+  if(trajHist.length > 1) {
+    const min = Math.min(...trajHist), max = Math.max(...trajHist), range = max-min||1;
+    html += '<div class="sparkline" style="height:80px">'+trajHist.slice(-40).map((v,i) => {
+      const h = Math.max(4, ((v-min)/range)*76);
+      const cls = v<0?'bar lo':i===trajHist.slice(-40).length-1?'bar hi':'bar';
+      return `<div class="${cls}" style="height:${h.toFixed(1)}px" title="${v.toFixed(3)}"></div>`;
+    }).join('')+'</div>';
+    html += '<div style="font-size:0.64rem;color:var(--muted);margin-top:0.25rem">min '+min.toFixed(3)+' · max '+max.toFixed(3)+'</div>';
+  } else {
+    html += '<div style="color:var(--muted);font-size:0.66rem">Not enough history yet</div>';
+  }
+  html += '</div>';
+
+  // Episode timeline by hour (left = 24h ago, right = now)
+  html += '<div class="card" style="grid-column:1/-1"><div class="card-head"><h3>Episode Timeline (24h)</h3></div>';
+  const now = Date.now();
+  const buckets = new Array(24).fill(0);
+  eps.forEach(e => { try { const age = (now - new Date(e.ts.replace('Z','+00:00')).getTime())/3600000; if(age>=0 && age<24) buckets[Math.floor(age)]++; } catch(x){} });
+  const bMax = Math.max(...buckets, 1);
+  html += '<div class="timeline">'+buckets.slice().reverse().map((c,i) => `<div class="t-bar" style="height:${(c/bMax*100).toFixed(1)}%;background:${c>0?'var(--cyan)':'var(--border)'}" title="hour ${23-i}: ${c}"></div>`).join('')+'</div>';
+  html += '<div style="font-size:0.64rem;color:var(--muted);margin-top:0.25rem;display:flex;justify-content:space-between"><span>24h ago</span><span>now</span></div>';
+  html += '</div>';
+
+  html += '</div>';
+  return html;
+}
+
+function hbar(label, val, max, color) {
+  const pct = max ? (val/max*100).toFixed(1) : 0;
+  return `<div class="hbar"><span style="width:80px">${label}</span><div class="hbar-track"><div class="hbar-fill" style="width:${pct}%;background:${color}"></div></div><span style="width:30px;text-align:right">${val}</span></div>`;
+}
+
+// ── Tool Index ─────────────────────────────────────────────────────────
+
+// ── Tool Index ─────────────────────────────────────────────────────────
+async function loadToolIndex() {
+  const el = document.getElementById('panel-tools');
+  if(!el || el.style.display==='none') return;
+  if(!state.toolIndex) await loadTools();
+  el.innerHTML = renderToolIndex();
+  populateNsGrid();
+  renderToolList();
+}
+
+function renderToolIndex() {
+  if(!state.toolIndex) return '<p style="color:var(--muted)">Loading…</p>';
+  let html = '';
+  html += '<div class="filter-bar">';
+  html += '<input id="tool-search" placeholder="Search all tools…" style="max-width:280px;margin-bottom:0" oninput="filterTools()" />';
+  html += '<span class="filter-chip on" data-filter="all" onclick="setToolFilter(this,\'all\')">All</span>';
+  html += '<span class="filter-chip" data-filter="core" onclick="setToolFilter(this,\'core\')">Core</span>';
+  html += '<span class="filter-chip" data-filter="domain" onclick="setToolFilter(this,\'domain\')">Domain</span>';
+  html += '<span class="filter-chip" data-filter="rare" onclick="setToolFilter(this,\'rare\')">Rare</span>';
+  html += '<span class="filter-chip" onclick="selectNs(null); document.getElementById(\'tool-search\').value=\'\'; filterTools();">↺ All Namespaces</span>';
+  html += '</div>';
+  html += '<div class="ns-grid" id="ns-grid"></div>';
+  html += '<div id="tool-list-detail" style="margin-top:0.6rem"></div>';
+  return html;
+}
+
+function populateNsGrid() {
+  if(!state.toolIndex) return;
+  const ns = state.toolIndex.namespaces||{};
+  const grid = document.getElementById('ns-grid');
+  if(!grid) return;
+  grid.innerHTML = Object.entries(ns).map(([name,data]) => {
+    const n = Object.keys(data.tools||{}).length;
+    if(n===0) return '';
+    const tierCounts = {core:0,domain:0,rare:0};
+    Object.values(data.tools||{}).forEach(t => { const ti = (t.tier||'domain'); tierCounts[ti] = (tierCounts[ti]||0)+1; });
+    return `<div class="ns-card${selectedNs===name?' selected':''}" data-ns="${name}" onclick="selectNs('${name}')">
+      <div class="ns-name">${name}</div>
+      <div class="ns-info">
+        <span>${n} tools</span>
+        ${tierCounts.core?`<span class="tag tag-tier-core tag-sm">c${tierCounts.core}</span>`:''}
+        ${tierCounts.domain?`<span class="tag tag-tier-domain tag-sm">d${tierCounts.domain}</span>`:''}
+        ${tierCounts.rare?`<span class="tag tag-tier-rare tag-sm">r${tierCounts.rare}</span>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function selectNs(name) {
+  selectedNs = name;
+  populateNsGrid();
+  renderToolList();
+}
+function pickTool(name) {
+  document.querySelectorAll('#left-nav .nav-item').forEach(b => b.classList.remove('active'));
+  const consoleBtn = document.querySelector('[data-panel="console"]');
+  if(consoleBtn) consoleBtn.classList.add('active');
+  document.querySelectorAll('.panel-content').forEach(p => p.style.display='none');
+  const cp = document.getElementById('panel-console');
+  if(cp) cp.style.display='';
+  renderToolConsole(name);
+}
+
+function renderToolList(filter='', tierFilter='all') {
+  if(!state.toolIndex) return;
+  const container = document.getElementById('tool-list-detail');
+  if(!container) return;
+  const nsMap = state.toolIndex.namespaces||{};
+  let allEntries = [];
+  // When searching, always search across all namespaces; otherwise show selected namespace or all
+  const namespaces = (filter || !selectedNs) ? Object.keys(nsMap) : [selectedNs];
+  namespaces.forEach(ns => {
+    Object.entries(nsMap[ns]?.tools||{}).forEach(([verb, t]) => {
+      allEntries.push({ ns, verb, t });
+    });
+  });
+  if(filter) {
+    const q = filter.toLowerCase();
+    allEntries = allEntries.filter(e => (`${e.ns}.${e.verb} ${e.t.description||''}`).toLowerCase().includes(q));
+  }
+  if(tierFilter !== 'all') {
+    allEntries = allEntries.filter(e => (e.t.tier||'domain') === tierFilter);
+  }
+  const title = filter ? 'Search results' : (selectedNs ? `<strong>${selectedNs}</strong> tools` : 'All tools');
+  let html = `<div class="card-head" style="margin-bottom:0.5rem"><h3>${title}</h3><span style="font-size:0.6rem;color:var(--muted)">${allEntries.length}</span></div>`;
+  html += allEntries.map(e =>
+    `<div class="tool-item" onclick="pickTool('${e.ns}.${e.verb}')">
+      <strong>${e.ns}.${e.verb}</strong>
+      ${e.t.tier ? `<span class="tag tag-tier-${esc(e.t.tier)} tag-sm">${e.t.tier}</span>` : ''}
+      ${e.t.dynamic ? '<span class="tag warm tag-sm">dynamic</span>' : ''}
+      ${e.t.calls ? `<span class="tag muted tag-sm">×${e.t.calls}</span>` : ''}
+      <div class="t-desc">${esc(e.t.description||'')}</div>
+    </div>`
+  ).join('') || '<div style="color:var(--muted);font-size:0.72rem;padding:0.5rem">No tools match</div>';
+  container.innerHTML = html;
+}
+
+function filterTools() { renderToolList(document.getElementById('tool-search')?.value||''); }
+let _toolFilter = 'all';
+function setToolFilter(el, f) {
+  _toolFilter = f;
+  document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+  renderToolList(document.getElementById('tool-search')?.value||'', f);
+}
+
+// ── Chat ───────────────────────────────────────────────────────────────
+let _chatHistory = JSON.parse(sessionStorage.getItem('k10-chat')||'[]');
+function loadChat() {
+  const el = document.getElementById('panel-chat');
+  if(!el || el.style.display==='none') return;
+  el.innerHTML = renderChat();
+  scrollChat();
+}
+function renderChat() {
+  return `<div class="card" style="display:flex;flex-direction:column;height:calc(100vh - 140px)">
+    <div class="card-head"><h3>Web Chat</h3><span style="font-size:0.6rem;color:var(--muted)">Hermes inference</span></div>
+    <div id="chat-messages" class="chat-messages" style="flex:1;overflow-y:auto;padding:0.5rem;background:var(--bg);border-radius:3px;margin-bottom:0.5rem">${_chatHistory.map(m => chatBubble(m)).join('')}</div>
+    <div style="display:flex;gap:0.5rem">
+      <textarea id="chat-input" placeholder="Message K10-Δ…" style="flex:1;margin-bottom:0;min-height:48px" onkeydown="if(event.ctrlKey&&event.key==='Enter')sendChat()"></textarea>
+      <button class="btn cyan" onclick="sendChat()">Send</button>
+    </div>
+    <div style="font-size:0.6rem;color:var(--muted);margin-top:0.3rem">Ctrl+Enter to send · <span id="chat-status">ready</span></div>
+  </div>`;
+}
+function chatBubble(m) {
+  const isUser = m.role === 'user';
+  return `<div class="chat-bubble ${isUser?'user':'agent'}">
+    <div class="chat-meta">${isUser?'You':'K10-Δ'} · ${relTime(m.ts)}</div>
+    ${esc(m.text)}
+  </div>`;
+}
+function scrollChat() {
+  const box = document.getElementById('chat-messages');
+  if(box) box.scrollTop = box.scrollHeight;
+}
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const status = document.getElementById('chat-status');
+  const text = input.value.trim();
+  if(!text) return;
+  _chatHistory.push({role:'user', text, ts:new Date().toISOString()});
+  input.value = '';
+  loadChat(); scrollChat();
+  status.textContent = 'thinking…';
+  status.style.color = 'var(--amber)';
+  try {
+    const res = await apiPost('/api/chat', {message: text});
+    if(res.ok) {
+      _chatHistory.push({role:'agent', text: String(res.reply||'(no reply)'), ts:new Date().toISOString(), source: res.source});
+    } else {
+      _chatHistory.push({role:'agent', text: 'Error: '+(res.error||'unknown'), ts:new Date().toISOString(), source:'error'});
+    }
+    sessionStorage.setItem('k10-chat', JSON.stringify(_chatHistory.slice(-100)));
+  } catch(e) {
+    _chatHistory.push({role:'agent', text: 'Error: '+e.message, ts:new Date().toISOString(), source:'error'});
+  }
+  status.textContent = 'ready';
+  status.style.color = 'var(--muted)';
+  loadChat(); scrollChat();
+}
+
+// ── Workflow Builder ───────────────────────────────────────────────────
+let _workflowSteps = [{tool:'', arguments:'{}', condition:''}];
+let _workflowName = '';
+async function loadWorkflows() {
+  const el = document.getElementById('panel-workflows');
+  if(!el || el.style.display==='none') return;
+  try {
+    const listRes = await apiPost('/api/tool', {name:'workflow.list', arguments:{}});
+    const wfNames = (listRes.ok && Array.isArray(listRes.result)) ? listRes.result : [];
+    el.innerHTML = renderWorkflowBuilder(wfNames);
+  } catch(e) {
+    el.innerHTML = '<div class="card"><div style="color:var(--muted)">Workflows unavailable</div></div>';
+  }
+}
+function renderWorkflowBuilder(wfNames) {
+  return `<div class="grid-2">
+    <div class="card"><div class="card-head"><h3>Saved Workflows</h3></div>
+      <div id="wf-list">${wfNames.length ? wfNames.map(n => `<div class="tool-item" onclick="loadWorkflow('${esc(n)}')">${esc(n)}</div>`).join('') : '<div style="color:var(--muted);font-size:0.72rem">No saved workflows</div>'}</div>
+    </div>
+    <div class="card"><div class="card-head"><h3>Builder</h3></div>
+      <input id="wf-name" placeholder="workflow name" value="${_workflowName ? esc(_workflowName) : ''}" oninput="_workflowName=this.value" />
+      <div id="wf-steps">${_workflowSteps.map((s,i) => wfStepRow(s,i)).join('')}</div>
+      <div class="btn-group" style="margin:0.5rem 0">
+        <button class="btn cyan sm" onclick="addWfStep()">+ Step</button>
+        <button class="btn sm" onclick="saveWorkflow()">Save</button>
+        <button class="btn sm" style="border-color:var(--green);color:var(--green)" onclick="runWorkflow()">Run</button>
+        <button class="btn rose sm" onclick="deleteWorkflow()">Delete</button>
+      </div>
+      <pre id="wf-result" style="max-height:200px;font-size:0.64rem">// result</pre>
+    </div>
+  </div>`;
+}
+function wfStepRow(s, i) {
+  return `<div class="wf-step">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem">
+      <strong style="font-size:0.7rem">Step ${i+1}</strong>
+      ${i>0 ? `<span style="font-size:0.6rem;color:var(--rose);cursor:pointer" onclick="removeWfStep(${i})">remove</span>` : ''}
+    </div>
+    <input placeholder="namespace.verb" value="${esc(s.tool)}" oninput="_workflowSteps[${i}].tool=this.value" />
+    <input placeholder="arguments JSON" value="${esc(s.arguments)}" oninput="_workflowSteps[${i}].arguments=this.value" />
+    <input placeholder="condition (optional, e.g. results[-1]['ok'])" value="${esc(s.condition)}" oninput="_workflowSteps[${i}].condition=this.value" />
+  </div>`;
+}
+function addWfStep() { _workflowSteps.push({tool:'', arguments:'{}', condition:''}); loadWorkflows(); }
+function removeWfStep(i) { _workflowSteps.splice(i,1); if(_workflowSteps.length===0) _workflowSteps.push({tool:'', arguments:'{}', condition:''}); loadWorkflows(); }
+async function saveWorkflow() {
+  const name = document.getElementById('wf-name').value.trim() || _workflowName;
+  if(!name) { document.getElementById('wf-result').textContent = 'Workflow name required'; return; }
+  const steps = _workflowSteps.map(s => { try { return {tool:s.tool, arguments:JSON.parse(s.arguments||'{}'), condition:s.condition||undefined}; } catch { return null; } }).filter(Boolean);
+  if(!steps.length) { document.getElementById('wf-result').textContent = 'No valid steps'; return; }
+  try {
+    const res = await apiPost('/api/tool', {name:'workflow.define', arguments:{name, steps:JSON.stringify(steps)}});
+    document.getElementById('wf-result').textContent = JSON.stringify(res, null, 2);
+    loadWorkflows();
+  } catch(e) { document.getElementById('wf-result').textContent = 'Error: '+e.message; }
+}
+async function runWorkflow() {
+  const name = document.getElementById('wf-name').value.trim() || _workflowName;
+  if(!name) { document.getElementById('wf-result').textContent = 'Workflow name required'; return; }
+  try {
+    const res = await apiPost('/api/tool', {name:'workflow.run', arguments:{name}});
+    document.getElementById('wf-result').textContent = JSON.stringify(res, null, 2);
+  } catch(e) { document.getElementById('wf-result').textContent = 'Error: '+e.message; }
+}
+async function deleteWorkflow() {
+  const name = document.getElementById('wf-name').value.trim() || _workflowName;
+  if(!name) { document.getElementById('wf-result').textContent = 'Workflow name required'; return; }
+  try {
+    const res = await apiPost('/api/tool', {name:'workflow.delete', arguments:{name}});
+    document.getElementById('wf-result').textContent = JSON.stringify(res, null, 2);
+    _workflowSteps = [{tool:'', arguments:'{}', condition:''}]; _workflowName = '';
+    loadWorkflows();
+  } catch(e) { document.getElementById('wf-result').textContent = 'Error: '+e.message; }
+}
+async function loadWorkflow(name) {
+  _workflowName = name;
+  try {
+    const res = await apiPost('/api/tool', {name:'memory.note_get', arguments:{key:'workflow.definitions'}});
+    if(res.ok && res.result) {
+      const all = typeof res.result === 'string' ? JSON.parse(res.result) : res.result;
+      const wf = all[name];
+      if(wf) {
+        const steps = Array.isArray(wf) ? wf : (wf.steps || []);
+        _workflowSteps = steps.map(s => ({tool:s.tool||'', arguments:JSON.stringify(s.arguments||s.args||{}), condition:s.condition||''}));
+        if(_workflowSteps.length===0) _workflowSteps = [{tool:'', arguments:'{}', condition:''}];
+      }
+    }
+  } catch(e) {}
+  loadWorkflows();
+}
+
+// ── Tool Console ───────────────────────────────────────────────────────
+let _cmdHistory = JSON.parse(sessionStorage.getItem('k10-cmd-history')||'[]');
+function renderToolConsole(prefill) {
+  const name = prefill || '';
+  const allTools = [];
+  if(state.toolIndex) Object.entries(state.toolIndex.namespaces||{}).forEach(([ns,data]) => Object.keys(data.tools||{}).forEach(v => allTools.push(`${ns}.${v}`)));
+  let html = `<div class="card"><div class="card-head"><h3>Execute Tool</h3><span style="font-size:0.6rem;color:var(--muted)">Ctrl+Enter to run</span></div>
+    <input id="console-tool" placeholder="namespace.verb" value="${esc(name)}" list="tool-suggestions" autofocus />
+    <datalist id="tool-suggestions">${allTools.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+    <textarea id="console-args" placeholder="{ }" onkeydown="if(event.ctrlKey&&event.key==='Enter')runTool()">{}</textarea>
+    <div class="btn-group" style="margin-bottom:0.5rem">
+      <button class="btn cyan" onclick="runTool()">Execute</button>
+      <button class="btn sm" style="border-color:var(--muted);color:var(--muted)" onclick="quickTool('system.health')">Health</button>
+      <button class="btn sm" style="border-color:var(--muted);color:var(--muted)" onclick="quickTool('memory.get_soul')">Soul</button>
+      <button class="btn sm" style="border-color:var(--muted);color:var(--muted)" onclick="quickTool('goal.pursue')">Pursue</button>
+      <button class="btn sm" style="border-color:var(--muted);color:var(--muted)" onclick="quickTool('cognition.reflect')">Reflect</button>
+    </div>
+    <pre id="console-result" style="max-height:300px">// result</pre>
+    ${_cmdHistory.length ? '<div class="card-head" style="margin-top:0.5rem"><h3>History</h3></div><div style="max-height:150px;overflow-y:auto">'+_cmdHistory.slice(-10).reverse().map(h=>`<div style="font-size:0.64rem;padding:0.2rem 0;cursor:pointer;color:var(--muted)" onclick="quickTool('${esc(h.tool)}')">${esc(h.tool)} · ${relTime(h.ts)}</div>`).join('')+'</div>' : ''}
+  </div>`;
+  return html;
+}
+
+function quickTool(name) {
+  document.getElementById('console-tool').value = name;
+  runTool();
+}
+
+async function runTool() {
+  const name = document.getElementById('console-tool').value.trim();
+  let args = {};
+  try { args = JSON.parse(document.getElementById('console-args').value||'{}'); } catch { document.getElementById('console-result').textContent='Invalid JSON'; return; }
+  document.getElementById('console-result').textContent = 'running…';
+  const started = Date.now();
+  try {
+    const res = await apiPost('/api/tool', {name, arguments:args});
+    const ms = Date.now() - started;
+    document.getElementById('console-result').textContent = `[${ms}ms]\n` + JSON.stringify(res, null, 2);
+    _cmdHistory.push({tool:name, ts:new Date().toISOString()});
+    if(_cmdHistory.length>50) _cmdHistory = _cmdHistory.slice(-50);
+    sessionStorage.setItem('k10-cmd-history', JSON.stringify(_cmdHistory));
+  } catch(e) { document.getElementById('console-result').textContent = 'Error: '+e.message; }
+}
+
+// ── Episodes ───────────────────────────────────────────────────────────
+async function loadEpisodes() {
+  const eps = await apiGet('/api/episodes?n=60');
+  const ct = document.getElementById('panel-episodes');
+  let html = `<div class="card"><div class="card-head"><h3>Recent Episodes</h3><span style="font-size:0.6rem;color:var(--muted)">${eps.length} shown</span></div>
+    <div class="filter-bar">
+      <input id="ep-search" placeholder="Search episodes…" style="max-width:250px;margin-bottom:0" oninput="filterEps()" />
+      <span class="filter-chip on" data-ef="all" onclick="setEpFilter(this,'all')">All</span>
+      <span class="filter-chip" data-ef="tool" onclick="setEpFilter(this,'tool')">Tool</span>
+      <span class="filter-chip" data-ef="cognition" onclick="setEpFilter(this,'cognition')">Cog</span>
+      <span class="filter-chip" data-ef="dream" onclick="setEpFilter(this,'dream')">Dream</span>
+    </div>
+    <div id="ep-list"></div></div>`;
+  ct.innerHTML = html;
+  state._eps = eps;
+  renderEpList();
+}
+let _epFilter = 'all';
+function setEpFilter(el, f) { _epFilter=f; document.querySelectorAll('[data-ef]').forEach(c=>c.classList.remove('on')); el.classList.add('on'); renderEpList(); }
+function filterEps() { renderEpList(); }
+function renderEpList() {
+  const q = (document.getElementById('ep-search')?.value||'').toLowerCase();
+  let eps = state._eps||[];
+  if(_epFilter!=='all') eps = eps.filter(e=>e.source===_epFilter);
+  if(q) eps = eps.filter(e=>(e.summary||'').toLowerCase().includes(q));
+  const ct = document.getElementById('ep-list');
+  if(!ct) return;
+  ct.innerHTML = eps.map(e => {
+    const src = e.source?`<span class="tag tag-sm">${esc(e.source)}</span>`:'';
+    const sum = e.summary||'(no summary)';
+    return `<div class="ep-item" onclick="this.classList.toggle('open')">
+      ${src} <strong>${esc(sum)}</strong>
+      <div class="ep-meta">${relTime(e.ts)}</div>
+      <div class="ep-detail"><pre style="font-size:0.64rem;max-height:200px">${esc(JSON.stringify(e.detail||e,null,2))}</pre></div>
+    </div>`;
+  }).join('')||'<div style="color:var(--muted);padding:0.5rem">No episodes match</div>';
+}
+
+// ── Hypotheses ─────────────────────────────────────────────────────────
+async function loadHypotheses() {
+  const hypos = await apiGet('/api/hypotheses');
+  document.getElementById('panel-hypotheses').innerHTML = `<div class="card"><div class="card-head"><h3>Hypotheses</h3></div>` +
+    hypos.map(h => `<div class="tool-item" style="border-left:3px solid ${h.status==='confirmed'?'var(--amber)':h.status==='falsified'?'var(--rose)':'var(--cyan)'}">
+      <div style="font-size:0.64rem;color:var(--muted)">${h.id} · ${h.status} · conf ${(h.confidence*100).toFixed(0)}%</div>
+      <div style="margin-top:0.2rem">${esc(h.text)}</div>
+    </div>`).join('') + '</div>';
+}
+
+// ── Axioms ────────────────────────────────────────────────────────────
+async function loadAxioms() {
+  const soul = await apiGet('/api/soul');
+  document.getElementById('panel-axioms').innerHTML = `<div class="card"><div class="card-head"><h3>Core Axioms</h3><span style="font-size:0.6rem;color:var(--muted)">${soul.axioms?.length||0}</span></div>` +
+    (soul.axioms||[]).map((a,i)=>`<div class="tool-item" style="border-left:3px solid var(--violet)"><span class="tag tag-sm">#${i}</span> ${esc(a)}</div>`).join('') + '</div>';
+}
+
+// ── Identity & Goals ──────────────────────────────────────────────────
+async function loadIdentity() {
+  const idt = await apiGet('/api/identity');
+  const el = document.getElementById('panel-identity');
+  if(!el || el.style.display==='none') return;
+  const html = el.innerHTML; // preserve goals section if already rendered
+}
+async function loadGoals() {
+  const goals = await apiGet('/api/goals?status=open');
+  const inProg = await apiGet('/api/goals?status=in_progress');
+  const stalled = await apiGet('/api/goals?status=stalled');
+  const all = [...inProg, ...goals, ...stalled];
+  const idt = await apiGet('/api/identity');
+  document.getElementById('panel-identity').innerHTML = `<div class="grid-2">
+    <div class="card"><div class="card-head"><h3>Identity Thread</h3></div>
+      <p><span class="tag warm">${esc(idt.trajectory||'—')}</span>
+         <span class="tag tag-sm">${esc(idt.who||'K10-Δ')}</span></p>
+      <p style="margin-top:0.4rem;font-size:0.7rem"><strong>Focus:</strong> ${esc(idt.current_focus||'—')}</p>
+      <p style="margin-top:0.3rem;font-size:0.7rem"><strong>Narrative:</strong> ${esc(idt.narrative||'')}</p>
+      <p style="margin-top:0.3rem;font-size:0.64rem;color:var(--muted)">${esc((idt.updated_at||'').slice(0,19))}</p>
+      <p style="margin-top:0.3rem">${(idt.next_moves||[]).map(m=>`<span class="tag tag-sm">${esc(m)}</span>`).join(' ')}</p>
+      ${(idt.recent_actions||[]).length ? '<div style="margin-top:0.5rem;font-size:0.64rem;color:var(--muted)">'+(idt.recent_actions||[]).slice(0,4).map(a=>`<div>· ${esc(a)}</div>`).join('')+'</div>' : ''}
+    </div>
+    <div class="card"><div class="card-head"><h3>Add Goal</h3></div>
+      <textarea id="goal-text" placeholder="What should K10-Δ pursue?"></textarea>
+      <div style="display:flex;gap:0.4rem;align-items:center;margin:0.4rem 0">
+        <select id="goal-kind" style="flex:1">
+          <option value="open">open (outward)</option>
+          <option value="research">research</option>
+          <option value="delivery">delivery</option>
+          <option value="general">general</option>
+        </select>
+        <input id="goal-priority" type="number" min="1" max="10" value="8" style="width:56px;margin:0" title="priority" />
+      </div>
+      <button class="btn cyan" onclick="addGoal()">Add Goal</button>
+      <p style="font-size:0.62rem;color:var(--muted);margin-top:0.5rem">Human/creator goals outrank will-seeded ones. Will pursues the top open goal each cycle.</p>
+    </div>
+  </div>
+  <div class="card" style="margin-top:0.5rem"><div class="card-head"><h3>Goals</h3><span style="font-size:0.6rem;color:var(--muted)">${all.length}</span></div>
+    ${all.length ? all.map(g => {
+      const src = g.source||'agent';
+      const kind = g.kind||'open';
+      const fails = g.failures||0;
+      return `<div class="goal-item">
+        <span class="tag tag-sm">p${g.priority}</span>
+        <span class="tag tag-sm ${g.status==='stalled'?'hot':g.status==='in_progress'?'warm':''}">${esc(g.status)}</span>
+        <span class="tag tag-sm muted">${esc(kind)}</span>
+        <span class="tag tag-sm muted">${esc(src)}</span>
+        <strong>${esc(g.text)}</strong>
+        <div class="g-meta">${g.id} · ${(g.updated||'').slice(0,16)} · ${(g.evidence||[]).length} evidence${fails?` · ${fails} fails`:''}</div>
+      </div>`;
+    }).join('') : '<div style="color:var(--muted);padding:0.5rem">No goals — Will may seed one when idle</div>'}
+  </div>`;
+}
+async function addGoal() {
+  const text = document.getElementById('goal-text').value.trim();
+  if(!text) return;
+  const kind = document.getElementById('goal-kind')?.value || 'open';
+  const priority = parseInt(document.getElementById('goal-priority')?.value || '8', 10);
+  await apiPost('/api/goal', {text, priority, kind});
+  loadGoals(); loadIdentity();
+}
+async function quickAddGoal() {
+  const text = document.getElementById('quick-goal').value.trim();
+  if(!text) return;
+  await apiPost('/api/goal', {text, priority:8});
+  document.getElementById('quick-goal').value = '';
+  loadGoals();
+}
+
+// ── Health ────────────────────────────────────────────────────────────
+async function loadHealth() {
+  try {
+    const h = await apiGet('/api/health');
+    state.health = h;
+    const w = h.warnings||[];
+    document.getElementById('panel-health').innerHTML = `<div class="grid-2">
+      <div class="card"><div class="card-head"><h3>System</h3></div>
+        <div style="font-size:0.7rem;line-height:1.8">
+          Uptime: ${fmtTime(h.uptime_seconds)}<br>
+          Threads: ${h.thread_count} (${h.exec_zombies} zombie)<br>
+          ${h.rss_mb!=null ? `Memory: ${h.rss_mb}MB<br>` : ''}
+          ${h.disk_free_mb!=null ? `Disk free: ${h.disk_free_mb}MB<br>` : ''}
+        </div>
+      </div>
+      <div class="card"><div class="card-head"><h3>Activity</h3></div>
+        <div style="font-size:0.7rem;line-height:1.8">
+          Episodes: ${h.episode_count}<br>
+          Open goals: ${h.open_goals}<br>
+          Stalled goals: ${h.stalled_goals}<br>
+          Tool errors (24h): ${h.tool_errors_24h}<br>
+          Hermes: ${h.hermes_available ? '<span class="tag tag-sm" style="color:var(--green)">available</span>' : '<span class="tag tag-sm hot">unavailable</span>'}
+        </div>
+      </div>
+      ${w.length ? `<div class="card" style="grid-column:1/-1;border-left:3px solid var(--rose)"><div class="card-head"><h3>Warnings</h3></div>
+        ${w.map(x=>`<div style="font-size:0.68rem;color:var(--rose);margin:0.2rem 0">⚠ ${esc(x)}</div>`).join('')}</div>` : ''}
+    </div>`;
+    updateNavPills();
+  } catch(e) {
+    document.getElementById('panel-health').innerHTML = '<div class="card"><div style="color:var(--muted)">Health unavailable — is host running?</div></div>';
+  }
+}
+
+// ── Creator ────────────────────────────────────────────────────────────
+async function loadFeedback() {
+  const items = await apiGet('/api/feedback?n=30');
+  document.getElementById('panel-creator').innerHTML = `<div class="card"><div class="card-head"><h3>Send Feedback</h3></div>
+    <select id="feedback-rating"><option value="substantive">substantive</option><option value="noise">noise</option><option value="pivot">pivot</option></select>
+    <textarea id="feedback-text" placeholder="Your message to the agent…"></textarea>
+    <button class="btn" onclick="sendFeedback()">Send</button>
+  </div>
+  <div class="card" style="margin-top:0.5rem"><div class="card-head"><h3>Recent</h3></div>
+    ${items.length ? items.reverse().map(f => `<div class="goal-item"><span class="tag tag-sm ${f.rating==='noise'?'hot':'warm'}">${f.rating||'note'}</span> ${esc(f.text)}<div class="g-meta">${(f.ts||'').slice(0,16)}</div></div>`).join('') : '<div style="color:var(--muted);padding:0.5rem">No feedback</div>'}
+  </div>`;
+}
+async function sendFeedback() {
+  const text = document.getElementById('feedback-text').value.trim();
+  if(!text) return;
+  await apiPost('/api/feedback', {text, rating:document.getElementById('feedback-rating').value});
+  loadFeedback();
+}
+
+// ── Will ──────────────────────────────────────────────────────────────
+async function loadWill() {
+  const el = document.getElementById('panel-will') || document.getElementById('panel-autonomy');
+  if(!el || el.style.display==='none') return;
+  try {
+    const a = await apiGet('/api/will');
+    el.innerHTML = renderWill(a);
+  } catch(e) {
+    try {
+      const a = await apiGet('/api/autonomy');
+      el.innerHTML = renderWill(a);
+    } catch(e2) {
+      el.innerHTML = '<div class="card"><div style="color:var(--muted)">Will unavailable</div></div>';
+    }
+  }
+}
+const loadAutonomy = loadWill;
+function renderWill(a) {
+  return renderAutonomy(a);
+}
+function renderAutonomy(a) {
+  let h = '';
+  const enabled = a.config?.enabled;
+  h += '<div class="card"><div class="card-head"><h3>Will</h3>';
+  h += '<button class="btn '+(enabled?'rose':'cyan')+' sm" onclick="toggleAutonomy()">'+(enabled?'Disable':'Enable')+'</button></div>';
+  h += '<p style="font-size:0.7rem;color:var(--muted)">'+(enabled
+    ? 'Active — single Will intention per reflection cycle (pursue, outward act, dream, revive, seed). Kill switch only.'
+    : 'Disabled — no autonomous behavior. Set via <code>cognition.autonomy</code> or soul.json.')+'</p></div>';
+
+  // Last intention (aliveness surface)
+  const li = a.last_intention || {};
+  h += '<div class="card"><div class="card-head"><h3>Last Intention</h3>';
+  if(li.kind) {
+    h += '<span class="tag tag-sm warm">'+esc(li.kind)+'</span>';
+    if(a.last_tick_cycle!=null) h += '<span class="tag tag-sm">cycle '+a.last_tick_cycle+'</span>';
+    h += '</div>';
+    h += '<div style="font-size:0.78rem;margin-bottom:0.4rem">'+esc(li.text||'')+'</div>';
+    h += '<div style="font-size:0.64rem;color:var(--muted)">';
+    if(li.tool) h += 'tool <span class="tag tag-sm">'+esc(li.tool)+'</span> ';
+    if(li.goal_id) h += 'goal <span class="tag tag-sm">'+esc(li.goal_id)+'</span> ';
+    if(li.source) h += 'source <span class="tag tag-sm muted">'+esc(li.source)+'</span>';
+    h += '</div>';
+  } else {
+    h += '</div><div style="font-size:0.64rem;color:var(--muted)">No intention yet — wait for a reflection cycle</div>';
+  }
+  h += '</div>';
+
+  // Alive metrics
+  const ratio = a.outward_act_ratio;
+  const cs = a.counters||{};
+  h += '<div class="card"><div class="card-head"><h3>Alive Metrics</h3></div>';
+  h += '<div class="metric-row" style="grid-template-columns:repeat(4,1fr)">';
+  h += '<div class="metric-mini"><div class="m-val" style="color:var(--cyan)">'+(ratio==null?'—':ratio)+'</div><div class="m-label">Outward Ratio</div></div>';
+  h += '<div class="metric-mini"><div class="m-val">'+(cs.outward_acts??0)+'</div><div class="m-label">Outward Acts</div></div>';
+  h += '<div class="metric-mini"><div class="m-val">'+(cs.tool_acts??0)+'</div><div class="m-label">Tool Acts</div></div>';
+  h += '<div class="metric-mini"><div class="m-val">'+(cs.pursuits??0)+'</div><div class="m-label">Pursuits</div></div>';
+  h += '</div></div>';
+
+  const r = a.last_review||{};
+  h += '<div class="card"><div class="card-head"><h3>Last Review</h3>';
+  h += r.cycle ? '<span class="tag tag-sm">cycle '+r.cycle+'</span></div>' : '</div>';
+  if(r.active_goals != null) {
+    h += '<div class="metric-row">';
+    h += '<div class="metric-mini"><div class="m-val" style="color:var(--cyan)">'+(r.active_goals??'—')+'</div><div class="m-label">Active Goals</div></div>';
+    h += '<div class="metric-mini"><div class="m-val" style="color:var(--rose)">'+(r.stalled_goals??'—')+'</div><div class="m-label">Stalled</div></div>';
+    h += '<div class="metric-mini"><div class="m-val" style="color:var(--violet)">'+(r.open_hypotheses??'—')+'</div><div class="m-label">Open Hypos</div></div>';
+    h += '<div class="metric-mini"><div class="m-val">'+(r.novelty??'—')+'</div><div class="m-label">Novelty</div></div>';
+    h += '<div class="metric-mini"><div class="m-val">'+(r.meta_ratio??'—')+'</div><div class="m-label">Meta %</div></div>';
+    h += '<div class="metric-mini"><div class="m-val">'+(r.never_called_tools??'—')+'</div><div class="m-label">Unused Tools</div></div>';
+    h += '</div>';
+  } else {
+    h += '<div style="font-size:0.64rem;color:var(--muted);margin-bottom:0.5rem">No review yet — runs every N reflection cycles</div>';
+  }
+  h += '</div>';
+  h += '<div class="card"><div class="card-head"><h3>Counters</h3></div>';
+  h += '<div class="metric-row" style="grid-template-columns:repeat(4,1fr)">';
+  h += '<div class="metric-mini"><div class="m-val">'+(cs.goals_seeded??0)+'</div><div class="m-label">Seeded</div></div>';
+  h += '<div class="metric-mini"><div class="m-val">'+(cs.goals_revived??0)+'</div><div class="m-label">Revived</div></div>';
+  h += '<div class="metric-mini"><div class="m-val">'+(cs.dreams_forced??0)+'</div><div class="m-label">Dreams</div></div>';
+  h += '<div class="metric-mini"><div class="m-val">'+(cs.hypos_seeded??0)+'</div><div class="m-label">Hypos</div></div>';
+  h += '</div></div>';
+  const cfg = a.config||{};
+  h += '<div class="card"><div class="card-head"><h3>Config</h3><span class="tag tag-sm" style="cursor:pointer" onclick="document.getElementById(\'auto-config-body\').style.display=document.getElementById(\'auto-config-body\').style.display===\'block\'?\'none\':\'block\'">toggle</span></div>';
+  h += '<div id="auto-config-body" style="display:none">';
+  Object.entries(cfg).forEach(([k,v]) => {
+    if(typeof v === 'boolean') {
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.7rem">';
+      h += '<span>'+esc(k)+'</span><button class="btn '+(v?'cyan sm':'sm')+'" style="border-color:var(--muted);min-width:44px" onclick="setAutonomyConfig(\''+k+'\','+(!v)+')">'+v+'</button></div>';
+    } else {
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.7rem">';
+      h += '<span>'+esc(k)+'</span>';
+      h += '<input style="width:56px;margin-bottom:0;text-align:right" value="'+v+'" onchange="setAutonomyConfig(\''+k+'\',+this.value)" /></div>';
+    }
+  });
+  h += '</div></div>';
+  h += '<div class="card"><div class="card-head"><h3>Actions</h3></div><div class="btn-group">';
+  h += '<button class="btn cyan sm" onclick="apiPost(\'/api/reflect\',{}).then(()=>loadWill())">Reflect</button>';
+  h += '<button class="btn sm" onclick="apiPost(\'/api/dream\',{}).then(()=>loadWill())">Dream</button>';
+  h += '<button class="btn cyan sm" onclick="apiPost(\'/api/pursue\',{}).then(()=>loadWill())">Pursue</button>';
+  h += '</div></div>';
+  return h;
+}
+async function toggleAutonomy() {
+  try {
+    let a;
+    try { a = await apiGet('/api/will'); } catch(e) { a = await apiGet('/api/autonomy'); }
+    const enabled = !(a.config?.enabled ?? a.enabled);
+    try { await apiPost('/api/will', {enabled}); } catch(e) { await apiPost('/api/autonomy', {enabled}); }
+    loadWill();
+  } catch(e) {}
+}
+async function setAutonomyConfig(key, value) {
+  try {
+    try { await apiPost('/api/will', {set: {[key]: value}}); }
+    catch(e) { await apiPost('/api/autonomy', {set: {[key]: value}}); }
+    loadWill();
+  } catch(e) {}
+}
+
+// ── Log ───────────────────────────────────────────────────────────────
+async function loadLog() {
+  const data = await apiGet('/api/log?lines=120');
+  document.getElementById('panel-log').innerHTML = `<div class="card"><div class="card-head"><h3>Host Log</h3>
+    <div class="btn-group">
+      <span class="filter-chip on" data-lf="all" onclick="setLogFilter(this,'all')">All</span>
+      <span class="filter-chip" data-lf="info" onclick="setLogFilter(this,'info')">Info</span>
+      <span class="filter-chip" data-lf="warn" onclick="setLogFilter(this,'warn')">Warn</span>
+      <span class="filter-chip" data-lf="err" onclick="setLogFilter(this,'err')">Err</span>
+      <label style="font-size:0.62rem;color:var(--muted);display:flex;align-items:center;gap:0.3rem;margin-left:0.5rem">
+        <input type="checkbox" id="log-stream" onchange="state.streamLog=this.checked" style="width:auto;margin:0" /> Stream
+      </label>
+    </div>
+  </div>
+  <pre id="log-content" style="max-height:500px"></pre></div>`;
+  state._logLines = data.lines||[];
+  renderLog();
+}
+let _logFilter='all';
+function setLogFilter(el, f) { _logFilter=f; document.querySelectorAll('[data-lf]').forEach(c=>c.classList.remove('on')); el.classList.add('on'); renderLog(); }
+function renderLog() {
+  let lines = state._logLines||[];
+  if(_logFilter==='info') lines = lines.filter(l=>/info/i.test(l) && !/error|err|warn/i.test(l));
+  else if(_logFilter==='warn') lines = lines.filter(l=>/warn/i.test(l));
+  else if(_logFilter==='err') lines = lines.filter(l=>/error|err/i.test(l));
+  const ct = document.getElementById('log-content');
+  if(ct) ct.innerHTML = lines.map(l => {
+    let cls = 'log-line';
+    if(/error|exception|traceback|err/i.test(l)) cls += ' err';
+    else if(/warn/i.test(l)) cls += ' warn';
+    else if(/info/i.test(l)) cls += ' info';
+    return `<div class="${cls}">${esc(l)}</div>`;
+  }).join('');
+}
+
+// ── Live Feed ──────────────────────────────────────────────────────────
+async function updateLiveFeed() {
+  try {
+    const eps = await apiGet('/api/episodes?n=40');
+    const feedEps = eps.filter(e => e.source==='tool' || e.source==='will' || e.source==='autonomy').slice(0,24);
+    document.getElementById('feed-count').textContent = feedEps.length;
+    document.getElementById('live-feed').innerHTML = feedEps.map(e => {
+      const d = e.detail||{};
+      if(e.source==='will' || e.source==='autonomy') {
+        const kind = (d.intention&&d.intention.kind) || e.summary || 'will';
+        const text = (d.intention&&d.intention.text) || e.summary || '';
+        return `<div class="feed-item">
+          <span class="f-tool" style="color:var(--amber)">will:${esc(String(kind).replace(/^\[will\]\s*/,''))}</span>
+          <span class="f-ok">◆</span>
+          <div style="font-size:0.58rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(String(text).slice(0,48))}</div>
+          <div class="f-ts">${relTime(e.ts)}</div>
+        </div>`;
+      }
+      const name = d.tool||d.name||'';
+      const ok = d.ok!==false;
+      const ms = d.duration_ms;
+      return `<div class="feed-item">
+        <span class="f-tool">${esc(name||e.summary||'')}</span>
+        <span class="${ok?'f-ok':'f-err'}">${ok?'✓':'✗'}</span>
+        ${ms!=null?`<span style="color:var(--muted);font-size:0.58rem"> ${ms}ms</span>`:''}
+        <div class="f-ts">${relTime(e.ts)}</div>
+      </div>`;
+    }).join('')||'<div style="color:var(--muted);font-size:0.66rem">No activity</div>';
+
+    // Will pulse
+    const wp = document.getElementById('will-pulse');
+    if(wp) {
+      const s = state.status||{};
+      const li = s.last_intention||{};
+      if(s.will_enabled===false) {
+        wp.innerHTML = '<span class="tag tag-sm hot">disabled</span>';
+      } else if(li.kind) {
+        wp.innerHTML = `<div><span class="tag tag-sm warm">${esc(li.kind)}</span>
+          ${s.outward_act_ratio!=null?`<span class="tag tag-sm">out ${s.outward_act_ratio}</span>`:''}</div>
+          <div style="margin-top:0.25rem;color:var(--text)">${esc(String(li.text||'').slice(0,72))}</div>`;
+      } else {
+        wp.textContent = 'waiting for cycle…';
+      }
+    }
+
+    // Top tools mini
+    const tu = state.status?.tool_usage;
+    if(tu) {
+      const top = (tu.top_tools||[]).slice(0,5);
+      document.getElementById('top-tools-mini').innerHTML = top.map(t => {
+        const name = t.tool||t[0]; const n = t.count??t[1];
+        return `<div style="font-size:0.64rem;margin:0.1rem 0"><span style="color:var(--cyan)">${esc(name)}</span> ×${n}</div>`;
+      }).join('')||'—';
+    }
+
+    // Warnings
+    if(state.health?.warnings?.length) {
+      document.getElementById('warnings-mini').innerHTML = state.health.warnings.map(w => `<div style="color:var(--rose);font-size:0.64rem;margin:0.15rem 0">⚠ ${esc(w)}</div>`).join('');
+    }
+
+    // Goal pulse
+    try {
+      const goals = await apiGet('/api/goals');
+      const counts = { open:0, in_progress:0, stalled:0, done:0 };
+      goals.forEach(g => { counts[g.status||'open'] = (counts[g.status||'open']||0)+1; });
+      const gp = document.getElementById('goal-pulse');
+      if(gp) gp.innerHTML = [
+        `<span class="mini-kpi" style="flex:1"><div class="k-val" style="color:var(--cyan);font-size:0.95rem">${counts.open}</div><div class="k-lbl">open</div></span>`,
+        `<span class="mini-kpi" style="flex:1"><div class="k-val" style="color:var(--amber);font-size:0.95rem">${counts.in_progress}</div><div class="k-lbl">active</div></span>`,
+        `<span class="mini-kpi" style="flex:1"><div class="k-val" style="color:var(--rose);font-size:0.95rem">${counts.stalled}</div><div class="k-lbl">stalled</div></span>`
+      ].join('');
+    } catch(e) {}
+
+    // Recent errors
+    const toolEps = eps.filter(e=>e.source==='tool');
+    const errs = toolEps.filter(e => (e.detail||{}).ok===false).slice(0,5);
+    document.getElementById('recent-errors-mini').innerHTML = errs.length ? errs.map(e => {
+      const d = e.detail||{};
+      return `<div style="color:var(--rose);margin:0.15rem 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(d.error||'failed')}">${esc(d.tool||'')} · ${esc(String(d.error||'failed').slice(0,30))}</div>`;
+    }).join('') : '<span style="color:var(--green)">no recent errors</span>';
+  } catch(e) {}
+}
+
+// ── Status ─────────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const s = await apiGet('/api/status');
+    state.status = s;
+    document.getElementById('status-text').textContent = 'boot #'+s.boot_count+' · '+s.tool_count+' tools · '+(s.trajectory?.label||'—');
+    document.getElementById('live-dot').className = 'dot';
+    if(document.getElementById('panel-overview')?.style.display !== 'none') {
+      document.getElementById('panel-overview').innerHTML = renderOverview(s);
+    }
+    updateNavPills();
+  } catch(e) {
+    document.getElementById('status-text').textContent = 'offline — check host';
+    document.getElementById('live-dot').className = 'dot off';
+  }
+}
+
+function updateNavPills() {
+  const s = state.status||{};
+  document.getElementById('pill-overview').textContent = s.reflection_cycles||'—';
+  document.getElementById('pill-analytics').textContent = s.tool_count||'—';
+  document.getElementById('pill-tools').textContent = s.tool_count||'—';
+  document.getElementById('pill-workflows').textContent = '⚙';
+  document.getElementById('pill-chat').textContent = _chatHistory.length ? String(_chatHistory.length) : '●';
+  document.getElementById('pill-episodes').textContent = s.episode_count||'—';
+  document.getElementById('pill-hypotheses').textContent = s.open_hypotheses||'—';
+  document.getElementById('pill-axioms').textContent = (s.axiom_count||'—');
+  const willPill = document.getElementById('pill-will');
+  if(willPill) {
+    if(s.will_enabled===false) {
+      willPill.textContent = 'off';
+      willPill.className = 'nav-pill warn';
+    } else {
+      const kind = s.last_intention?.kind;
+      willPill.textContent = kind && kind!=='none' ? kind : 'on';
+      willPill.className = kind && kind!=='none' ? 'nav-pill ok' : 'nav-pill';
+    }
+  }
+  const h = state.health;
+  const pill = document.getElementById('pill-health');
+  if(h) {
+    const w = h.warnings?.length||0;
+    pill.textContent = w ? `⚠ ${w}` : 'ok';
+    pill.className = w ? 'nav-pill warn' : 'nav-pill ok';
+  }
+}
+
+// ── Tools ──────────────────────────────────────────────────────────────
+async function loadTools() {
+  try {
+    state.toolIndex = await apiGet('/api/tools');
+    populateNsGrid();
+  } catch(e) {}
+}
+
+// ── Auto-refresh ──────────────────────────────────────────────────────
+function toggleAutoRefresh() {
+  state.autoRefresh = !state.autoRefresh;
+  document.getElementById('btn-refresh').textContent = state.autoRefresh ? '⏻ Auto' : '⏸ Paused';
+  document.getElementById('btn-refresh').style.color = state.autoRefresh ? 'var(--muted)' : 'var(--rose)';
+  document.getElementById('btn-refresh').style.borderColor = state.autoRefresh ? 'var(--muted)' : 'var(--rose)';
+}
+
+// ── Live Metrics Update ─────────────────────────────────────────────────
+async function updateLiveMetrics() {
+  try {
+    const m = await apiGet('/api/metrics');
+    if(!state.autoRefresh) return;
+
+    // Append to history (keep last 30 samples = 150s window)
+    _metricsHistory.push(m);
+    if(_metricsHistory.length > 30) _metricsHistory = _metricsHistory.slice(-30);
+    sessionStorage.setItem('k10-metrics', JSON.stringify(_metricsHistory.slice(-20)));
+
+    // Update overview panels if visible
+    if(document.getElementById('panel-overview')?.style.display === 'none') return;
+    updateSparklines(m);
+    updateGauges(m);
+    updateHealthBadges(m);
+  } catch(e) {}
+}
+
+function updateSparklines(m) {
+  // Trajectory sparkline
+  let hist = _metricsHistory.map(h => h.trajectory_score).filter(v => v != null);
+  if(hist.length < 2) hist = [0, m.trajectory_score||0];
+  const sp = document.getElementById('traj-sparkline');
+  if(sp) {
+    let min = Math.min(...hist), max = Math.max(...hist), range = max-min||1;
+    sp.innerHTML = hist.slice(-12).map((v,i) => {
+      let h = Math.max(4, ((v-min)/range)*44);
+      let cls = 'bar'; if(v<0) cls='bar lo'; else if(i===hist.slice(-12).length-1) cls='bar hi';
+      return '<div class="'+cls+'" style="height:'+h+'px" title="'+v.toFixed(3)+'"></div>';
+    }).join('');
+  }
+  let lbl = document.getElementById('traj-label');
+  if(lbl) lbl.textContent = m.trajectory_label||'—';
+  let sc = document.getElementById('traj-score-text');
+  if(sc) sc.textContent = 'score: '+((m.trajectory_score||0).toFixed(3));
+
+  // Tool rate heat bars
+  let heat = document.getElementById('tool-heat');
+  if(heat) {
+    let rates = _metricsHistory.slice(-10).map(h => h.tool_calls_5m||0);
+    let rmax = Math.max(...rates, 1);
+    heat.innerHTML = rates.map(r => {
+      let pct = r/rmax;
+      let cls = pct===0?'h0':pct<0.3?'h1':pct<0.6?'h2':'h3';
+      return '<div class="h-bar '+cls+'" style="height:'+(Math.max(4, pct*26))+'px" title="'+r+' calls"></div>';
+    }).join('');
+  }
+  let rl = document.getElementById('tool-rate-label');
+  if(rl) rl.textContent = (m.tool_rate_per_min||0).toFixed(1)+'/min';
+  let rd = document.getElementById('tool-rate-detail');
+  if(rd) rd.textContent = '5m: '+(m.tool_calls_5m||0)+' calls · 1m: '+(m.tool_calls_1m||0);
+}
+
+function updateGauges(m) {
+  // Memory
+  let mv = document.getElementById('mem-val');
+  let mg = document.getElementById('mem-gauge');
+  if(mv&&mg) {
+    let rss = m.rss_mb||0;
+    mv.textContent = rss ? rss.toFixed(1) : '—';
+    let pct = Math.min(100, rss/5);
+    mg.style.width = pct+'%';
+    mg.className = 'gauge-fill '+(rss>400?'rose':rss>200?'amber':'cyan');
+  }
+  // Errors
+  let ec = document.getElementById('err-count');
+  let eg = document.getElementById('err-gauge');
+  if(ec&&eg) {
+    let errs = m.tool_errors_5m||0;
+    ec.textContent = errs;
+    ec.style.color = errs>2?'var(--rose)':errs>0?'var(--amber)':'var(--text)';
+    eg.style.width = Math.min(100, errs*20)+'%';
+  }
+}
+
+function updateHealthBadges(m) {
+  // Threads
+  let ht = document.getElementById('hb-threads');
+  if(ht) {
+    let tc = m.thread_count||0;
+    ht.innerHTML = '<span class="pulse-dot '+(tc>20?'warn':'ok')+'"></span> threads '+tc;
+    ht.className = 'pulse-badge '+(tc>30?'err':tc>20?'warn':'ok');
+  }
+  // Zombies
+  let hz = document.getElementById('hb-zombies');
+  if(hz) {
+    let zc = m.zombie_threads||0;
+    hz.innerHTML = '<span class="pulse-dot '+(zc>0?'err':'ok')+'"></span> zombies '+zc;
+    hz.className = 'pulse-badge '+(zc>0?'err':'ok');
+  }
+  // Hermes
+  let hh = document.getElementById('hb-hermes');
+  if(hh) {
+    let ha = m.hermes_available !== undefined ? m.hermes_available : true;
+    hh.innerHTML = '<span class="pulse-dot '+(ha?'ok':'err')+'"></span> hermes '+(ha?'up':'down');
+    hh.className = 'pulse-badge '+(ha?'ok':'err');
+  }
+  // Will
+  let hw = document.getElementById('hb-will');
+  if(hw) {
+    const on = m.will_enabled !== false;
+    const kind = m.last_intention?.kind;
+    const label = !on ? 'off' : (kind && kind!=='none' ? kind : 'on');
+    hw.innerHTML = '<span class="pulse-dot '+(on?'ok':'err')+'"></span> will '+esc(label);
+    hw.className = 'pulse-badge '+(on?'ok':'err');
+  }
+}
+
+let _pollTimer = null;
+let _pollCount = 0;
+function startPolling() {
+  if(_pollTimer) clearInterval(_pollTimer);
+  _pollTimer = setInterval(async () => {
+    if(!state.autoRefresh) return;
+    _pollCount++;
+    await loadStatus();
+    if(_pollCount % 3 === 0) await updateLiveMetrics();
+    if(_pollCount % 2 === 0) await updateLiveFeed();
+    const activePanel = document.querySelector('.panel-content:not([style*="display:none"])')?.id;
+    if(state.streamLog && activePanel==='panel-log') loadLog();
+    if(activePanel==='panel-health' && _pollCount % 3 === 0) loadHealth();
+    if(activePanel==='panel-will' && _pollCount % 2 === 0) loadWill();
+    if(activePanel==='panel-analytics' && _pollCount % 6 === 0) loadAnalytics();
+    if(activePanel==='panel-workflows') loadWorkflows();
+    if(activePanel==='panel-chat') { /* chat is push-only */ }
+    if(activePanel==='panel-episodes' && (Date.now()-_lastEpLoad)>60000) loadEpisodes();
+  }, 10000);
+}
+let _lastEpLoad = 0;
+
+// ── Init ───────────────────────────────────────────────────────────────
+async function init() {
+  await Promise.all([loadStatus(), loadTools()]);
+  updateLiveFeed();
+  document.getElementById('panel-overview').innerHTML = renderOverview(state.status);
+  if(!selectedNs && state.toolIndex) {
+    const ns = Object.keys(state.toolIndex.namespaces||{});
+    if(ns.length) selectedNs = ns[0];
+    populateNsGrid();
+  }
+  startPolling();
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Live agent state — regenerated at runtime, never committed
+soul.json
+soul_history/
+goals.json
+episodes.jsonl
+notes.json
+hypotheses.json
+dream_log.jsonl
+schedule.json
+staged_tools.json
+tools_test_report.json
+workspace/
+
+# Logs
+*.log
+host.log*
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Firmware / hardware dumps
+*.bin
+
+# Terminal session captures
+terminals/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
