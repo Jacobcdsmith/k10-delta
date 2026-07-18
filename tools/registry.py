@@ -22,6 +22,7 @@ NAMESPACE_DESCRIPTIONS: dict[str, str] = {
     "exec": "Python and shell execution on the host.",
     "net": "HTTP fetch, web search, and network requests.",
     "mqtt": "Publish and subscribe to MQTT brokers.",
+    "github": "Repos, files, issues, and pull requests via the GitHub REST API.",
     "system": "Host info, time, and process control.",
     "cron": "Scheduled and repeating background tasks.",
     "hermes": "Delegation to the local Hermes agent.",
@@ -68,6 +69,7 @@ NAMESPACE_DEFAULT_TIERS: dict[str, str] = {
     "creator": "rare",
     "mqtt": "rare",
     "cron": "rare",
+    "github": "rare",
 }
 
 Handler = Callable[[dict], str]

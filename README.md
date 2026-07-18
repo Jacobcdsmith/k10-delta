@@ -94,7 +94,7 @@ registry; the K10 firmware is a sensor/actuator peer bridged in over TCP.
 | Namespace | File | Purpose |
 |---|---|---|
 | memory / identity / goals | `memory.py`, `identity_ns.py`, `goals_ns.py` | Episodic log, creator feedback, goal pursuit |
-| fs / md / exec / net / mqtt | `fs.py`, `md_ns.py`, `exec_sys.py`, `exec_net_system.py`, `net.py`, `mqtt_ns.py` | Files, code execution, HTTP, MQTT brokers |
+| fs / md / exec / net / mqtt / github | `fs.py`, `md_ns.py`, `exec_sys.py`, `exec_net_system.py`, `net.py`, `mqtt_ns.py`, `github_ns.py` | Files, code execution, HTTP, MQTT brokers, GitHub repos/issues/PRs |
 | cognition / selfmod / skill / workflow | `cognition_ns.py`, `selfmod_ns.py`, `skill_ns.py`, `workflow_ns.py` | Reflection, self-modification, skill/workflow definition |
 | device / k10 / sentiment / act | `device_ns.py`, `k10_ns.py`, `sentiment_ns.py`, `act_ns.py` | Hardware I/O and action dispatch |
 
@@ -168,6 +168,12 @@ python tools_test_runner.py    # exercises every registered MCP tool
   execution to the tool registry. Treat this like any other agent with shell
   access: run it under a user/account with only the permissions you're willing
   to hand to an autonomous process.
+- `tools/github_ns.py` reads `GITHUB_TOKEN` from the environment only — never
+  as a tool argument, so it can't leak into `episodes.jsonl` or the dashboard.
+  `github.write_file`, `github.create_issue`, and `github.create_pr` are
+  write actions the agent can take on its own initiative; scope the token to
+  only the repos you're comfortable with it touching (a fine-grained PAT, not
+  a classic token with blanket `repo` access).
 
 ## Background
 
