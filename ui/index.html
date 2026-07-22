@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>K10-Δ · Will Console v6.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -26,10 +26,106 @@
     @media (max-width: 1200px) { .app { grid-template-columns: 180px 1fr; } .sidebar-r { display: none; } }
     @media (max-width: 800px) { .app { grid-template-columns: 1fr; } .sidebar-l { display: none; } }
 
+    /* ── Mobile <480px improvements ──────────────────────────── */
+    @media (max-width: 480px) {
+      body { font-size: 14px; }
+      .main { padding: 0.5rem; gap: 0.4rem; }
+      .topbar { flex-wrap: wrap; gap: 0.4rem; }
+      .status-bar { font-size: 0.65rem; }
+      .btn { min-height: 44px; padding: 0.4rem 0.8rem; font-size: 0.75rem; }
+      .nav-item { padding: 0.7rem 0.6rem; min-height: 44px; font-size: 0.78rem; }
+      .log-line { font-size: 0.7rem; line-height: 1.5; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr !important; }
+      .ns-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+      .chart-grid { grid-template-columns: 1fr; }
+      .sparkline { height: 32px; }
+      .sparkline .bar { min-width: 3px; }
+      .gauge { height: 4px; }
+      .live-counter { font-size: 1.2rem; }
+      .metric-mini .m-val { font-size: 1.1rem; }
+      .tag, .concept-tag { font-size: 0.7rem; }
+      .sidebar-r { display: none; }
+      .metric-row { grid-template-columns: repeat(2, 1fr); }
+      .filter-bar { gap: 0.25rem; }
+      .filter-chip { padding: 0.25rem 0.4rem; min-height: 36px; }
+      .ep-item { font-size: 0.75rem; padding: 0.5rem 0; }
+      .tool-item { font-size: 0.75rem; padding: 0.5rem 0.65rem; }
+      .tool-item .t-desc { font-size: 0.68rem; }
+      .concepts { gap: 0.2rem; }
+      .concept-tag { font-size: 0.65rem; padding: 0.1rem 0.35rem; }
+      .goal-item { font-size: 0.75rem; }
+      .feed-item { font-size: 0.7rem; }
+    }
+
+    /* ── Touch support (pointer: coarse) ─────────────────────── */
+    @media (hover: none) and (pointer: coarse) {
+      .nav-item, .btn, .tool-item, .filter-chip, .ns-card {
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+        user-select: none;
+      }
+      .nav-item:active, .btn:active, .tool-item:active, .ns-card:active {
+        transform: scale(0.97);
+        opacity: 0.85;
+      }
+      .filter-chip:active {
+        opacity: 0.7;
+      }
+      /* Active state overrides for touch */
+      .nav-item.active:active { background: rgba(0,212,170,0.15); }
+    }
+
+    /* ── iOS input zoom prevention ───────────────────────────── */
+    @supports (-webkit-touch-callout: none) {
+      input, select, textarea { font-size: 16px; }
+    }
+
+    /* ── Smooth scroll behavior ──────────────────────────────── */
+    .main, .sidebar-l, .sidebar-r { -webkit-overflow-scrolling: touch; }
+
+
     /* Sidebar Left — Nav */
     .sidebar-l {
       background: var(--panel); border-right: 1px solid var(--border);
       display: flex; flex-direction: column; overflow-y: auto; padding: 0.75rem;
+    }
+
+    /* Mobile sidebar as overlay */
+    @media (max-width: 800px) {
+      .sidebar-l {
+        position: fixed; left: 0; top: 0; height: 100vh;
+        width: 75vw; max-width: 280px; z-index: 1000;
+        transform: translateX(-100%); transition: transform 0.25s ease;
+        border-right: 1px solid var(--border);
+        box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+      }
+      .sidebar-l.open { transform: translateX(0); }
+      .sidebar-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+        z-index: 999; opacity: 0; pointer-events: none;
+        transition: opacity 0.25s ease;
+      }
+      .sidebar-overlay.show { opacity: 1; pointer-events: auto; }
+      .mobile-menu-btn {
+        position: fixed; left: 0.5rem; top: 0.5rem; z-index: 1001;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 4px; width: 40px; height: 40px;
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; cursor: pointer; gap: 4px;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+      .mobile-menu-btn .bar {
+        width: 18px; height: 2px; background: var(--text);
+        border-radius: 1px; transition: transform 0.2s ease, opacity 0.2s ease;
+      }
+      .mobile-menu-btn.active .bar:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+      .mobile-menu-btn.active .bar:nth-child(2) { opacity: 0; }
+      .mobile-menu-btn.active .bar:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+      .brand { padding-left: 3rem; }
+    }
+    @media (min-width: 801px) {
+      .mobile-menu-btn, .sidebar-overlay { display: none; }
     }
     .brand { padding: 0.5rem 0.5rem 1rem; border-bottom: 1px solid var(--border); margin-bottom: 0.5rem; }
     .brand h2 { font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; letter-spacing: -0.02em; }
@@ -279,6 +375,10 @@
   </style>
 </head>
 <body>
+<div class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Toggle menu">
+  <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
 <div class="app">
   <!-- Sidebar Left -->
   <aside class="sidebar-l" id="left-nav">
@@ -1560,6 +1660,24 @@ async function init() {
 }
 
 init();
+  // ── mobile menu toggle ─────────────────────────────────────
+  (function() {
+    const btn = document.getElementById('mobileMenuBtn');
+    const sidebar = document.querySelector('.sidebar-l');
+    const overlay = document.getElementById('sidebarOverlay');
+    if (btn && sidebar && overlay) {
+      function open() { sidebar.classList.add('open'); btn.classList.add('active'); overlay.classList.add('show'); document.body.style.overflow = 'hidden'; }
+      function close() { sidebar.classList.remove('open'); btn.classList.remove('active'); overlay.classList.remove('show'); document.body.style.overflow = ''; }
+      btn.addEventListener('click', function(e) { e.stopPropagation(); sidebar.classList.contains('open') ? close() : open(); });
+      overlay.addEventListener('click', close);
+      // close on nav item click
+      sidebar.querySelectorAll('.nav-item').forEach(function(item) {
+        item.addEventListener('click', function() { if (window.innerWidth <= 800) close(); });
+      });
+      // handle resize
+      window.addEventListener('resize', function() { if (window.innerWidth > 800) close(); });
+    }
+  })();
 </script>
 </body>
 </html>

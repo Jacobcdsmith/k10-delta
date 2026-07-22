@@ -51,6 +51,9 @@ from tools import skill_ns
 from tools import device_ns
 from tools import workflow_ns
 from tools import sentiment_ns
+from tools import utils_ns
+from tools import text_ns
+from tools import data_ns
 from tools import k10_ns
 from goals import GoalStore, GOALS_PATH
 from dashboard import configure as configure_dashboard, start_dashboard
@@ -320,6 +323,9 @@ def boot() -> HostState:
     workflow_ns.register(registry, ctx)
     sentiment_ns.register(registry, ctx)
     k10_ns.register(registry, ctx)
+    utils_ns.register(registry, ctx)
+    text_ns.register(registry, ctx)
+    data_ns.register(registry, ctx)
 
     engine._update_identity_thread(
         _substantive_episodes(read_episodes(100)),
