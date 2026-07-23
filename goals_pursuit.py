@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any, Callable
 
 from goals import GoalStore
@@ -44,9 +46,42 @@ _KIND_TEMPLATES: dict[str, list[dict[str, str]]] = {
 }
 
 MAX_FAILURES = 3
+MIN_DELIVERABLE_BYTES = 80  # catches empty/failed writes, not a "realness" bar
 
 
-def _result_ok(result: Any) -> bool:
+def _verify_deliver_result(result: Any) -> bool:
+    """A deliver step is only 'ok' if act.deliver actually wrote a
+    non-trivial file — free-text evidence alone can claim anything."""
+    try:
+        parsed = json.loads(result) if isinstance(result, str) else result
+        if not isinstance(parsed, dict) or not parsed.get("ok"):
+            return False
+        write = parsed.get("write") or {}
+        path = write.get("absolute") or write.get("path")
+        if not path:
+            return False
+        p = Path(path)
+        return p.exists() and p.is_file() and p.stat().st_size >= MIN_DELIVERABLE_BYTES
+    except Exception:
+        return False
+
+
+def _is_hermes_in_flight(action: str, result: Any) -> bool:
+    """True if a hermes step returned early because the query is still
+    running (see hermes_bridge.HermesBridge.query's poll_timeout) -- this
+    is neither success nor failure, just "still working"."""
+    if action != "hermes":
+        return False
+    try:
+        parsed = json.loads(result) if isinstance(result, str) else result
+    except Exception:
+        return False
+    return isinstance(parsed, dict) and parsed.get("in_flight") is True
+
+
+def _result_ok(result: Any, action: str | None = None) -> bool:
+    if action == "deliver" or (isinstance(action, str) and action.startswith("tool:act.deliver")):
+        return _verify_deliver_result(result)
     if not isinstance(result, str):
         return True
     try:
@@ -65,6 +100,21 @@ class GoalPursuitService:
 
     # ── step dispatcher (single table — no triplicated arg building) ──
 
+    def _compose_deliverable(self, text: str, gid: str, step_results: dict, evidence: list) -> str:
+        """Compose real deliverable content from full step results, not a
+        single 200-char-truncated evidence echo."""
+        synth = step_results.get("synthesise", {}).get("text", "")
+        hermes = step_results.get("hermes", {}).get("text", "")
+        parts = [f"# Goal {gid}\n\n{text}\n"]
+        if synth:
+            parts.append(f"\n## Synthesis\n{synth}")
+        if hermes:
+            parts.append(f"\n## Delegated output (hermes)\n{hermes}")
+        if not synth and not hermes:
+            trail = "\n".join(f"- {e.get('text', '')}" for e in evidence[-10:])
+            parts.append(f"\n## Evidence trail\n{trail or '(no prior evidence)'}")
+        return "\n".join(parts)
+
     def _build_step(self, action: str, goal: dict) -> tuple[str, dict]:
         """Map a pursuit action to (tool_name, args)."""
         text = goal["text"]
@@ -73,13 +123,10 @@ class GoalPursuitService:
         evidence = goal.get("evidence") or []
         if evidence:
             latest = str(evidence[-1].get("text", ""))
+        step_results = goal.get("step_results") or {}
 
         builders: dict[str, tuple[str, dict]] = {
             "search": (
-                "net.search",
-                {"query": text[:120], "count": 5},
-            ),
-            "fetch": (
                 "net.search",
                 {"query": text[:120], "count": 5},
             ),
@@ -102,10 +149,7 @@ class GoalPursuitService:
                 {
                     "goal_id": gid,
                     "path": f"goal_{gid}.md",
-                    "content": (
-                        f"# Goal {gid}\n\n{text}\n\n"
-                        f"## Latest evidence\n{latest}"
-                    ),
+                    "content": self._compose_deliverable(text, gid, step_results, evidence),
                     "summary": f"Delivered artifact for goal {gid}",
                 },
             ),
@@ -125,12 +169,56 @@ class GoalPursuitService:
             raise ValueError(f"Unknown pursuit action: {action}")
         return builders[action]
 
+    def _swarm_search(self, goal: dict) -> str:
+        """Parallel multi-angle net.search fan-out. Used to be a second,
+        byte-for-byte-identical net.search call (the old 'fetch' step) --
+        now genuinely covers more of the topic per goal instead of wasting
+        a round-trip repeating the exact same query."""
+        text = goal["text"]
+        base = text[:100]
+        queries = [text[:120], f"{base} explained", f"{base} examples"]
+        results: list[dict] = []
+        errors: list[str] = []
+        seen_urls: set[str] = set()
+
+        with ThreadPoolExecutor(max_workers=len(queries)) as pool:
+            futures = {
+                pool.submit(self.call_tool, "net.search", {"query": q, "count": 5}): q
+                for q in queries
+            }
+            for fut in as_completed(futures):
+                q = futures[fut]
+                try:
+                    raw = fut.result()
+                    parsed = json.loads(raw) if isinstance(raw, str) else raw
+                except Exception as e:
+                    errors.append(f"{q}: {e}")
+                    continue
+                if isinstance(parsed, dict) and parsed.get("ok"):
+                    for r in parsed.get("results", []):
+                        url = r.get("url")
+                        if url and url in seen_urls:
+                            continue
+                        if url:
+                            seen_urls.add(url)
+                        results.append(r)
+                else:
+                    err = parsed.get("error") if isinstance(parsed, dict) else "bad response"
+                    errors.append(f"{q}: {err}")
+
+        return json.dumps(
+            {"ok": bool(results), "queries": queries, "results": results, "errors": errors},
+            indent=2,
+        )
+
     def _dispatch(self, action: str, goal: dict) -> tuple[str, Any]:
-        """Run a named pursuit step; normalise fetch→search for evidence tags."""
+        """Run a named pursuit step; fetch now fans out a parallel multi-
+        angle search instead of duplicating 'search'."""
+        if action == "fetch":
+            return "search", self._swarm_search(goal)
         tool_name, tool_args = self._build_step(action, goal)
         result = self.call_tool(tool_name, tool_args)
-        tag = "search" if action == "fetch" else action
-        return tag, result
+        return action, result
 
     def _run_plan_step(self, goal: dict, step: dict) -> tuple[str, Any]:
         action = step.get("action") or "synthesise"
@@ -365,7 +453,8 @@ class GoalPursuitService:
             result = self.call_tool(str(tool_name), tool_args)
             action = f"tool:{tool_name}"
             self.goals.add_evidence(gid, f"{action}: {str(result)[:200]}")
-            if _result_ok(result):
+            self.goals.set_step_result(gid, action, result)
+            if _result_ok(result, action):
                 self.goals.clear_failures(gid)
             else:
                 self.goals.record_failure(gid)
@@ -392,10 +481,19 @@ class GoalPursuitService:
             next_step = next((s for s in plan if not s.get("executed")), None)
             if next_step:
                 action, result = self._run_plan_step(goal, next_step)
-                self._mark_plan_step_done(gid, plan, next_step)
+                in_flight = _is_hermes_in_flight(action, result)
+                if not in_flight:
+                    self._mark_plan_step_done(gid, plan, next_step)
                 plan_step_meta = next_step
-                self.goals.add_evidence(gid, f"{action}: {str(result)[:200]}")
-                if _result_ok(result):
+                evidence_text = (
+                    f"{action}: in_flight, poll via hermes.poll" if in_flight
+                    else f"{action}: {str(result)[:200]}"
+                )
+                self.goals.add_evidence(gid, evidence_text)
+                self.goals.set_step_result(gid, action, result)
+                if in_flight:
+                    pass  # neither success nor failure -- don't touch the circuit breaker
+                elif _result_ok(result, action):
                     self.goals.clear_failures(gid)
                 else:
                     self.goals.record_failure(gid)
@@ -424,9 +522,17 @@ class GoalPursuitService:
             # Unknown step → synthesise (legacy default)
             action, result = self._dispatch("synthesise", goal)
 
-        self.goals.add_evidence(gid, f"{action}: {str(result)[:200]}")
+        in_flight = _is_hermes_in_flight(action, result)
+        evidence_text = (
+            f"{action}: in_flight, poll via hermes.poll" if in_flight
+            else f"{action}: {str(result)[:200]}"
+        )
+        self.goals.add_evidence(gid, evidence_text)
+        self.goals.set_step_result(gid, action, result)
 
-        if _result_ok(result):
+        if in_flight:
+            pass  # neither success nor failure -- don't touch the circuit breaker
+        elif _result_ok(result, action):
             self.goals.clear_failures(gid)
         else:
             self.goals.record_failure(gid)

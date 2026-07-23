@@ -11,8 +11,6 @@ from .context import ctx_get
 from .schema import _p, tool
 
 
-
-
 def register(registry, ctx) -> None:
     soul = ctx_get(ctx, "soul")
     save_soul = ctx_get(ctx, "save_soul")
@@ -78,6 +76,13 @@ def register(registry, ctx) -> None:
         goals.mark_stalled(gid, reason)
         return json.dumps({"ok": True, "goal": goals.get(gid)}, indent=2)
 
+    def goal_delete(args: dict) -> str:
+        gid = args["id"]
+        if not goals.exists(gid):
+            return json.dumps({"ok": False, "error": f"Goal not found: {gid}"}, indent=2)
+        deleted = goals.delete(gid)
+        return json.dumps({"ok": True, "deleted": deleted}, indent=2)
+
     def creator_feedback(args: dict) -> str:
         entry = {
             "ts": _now_iso(),
@@ -86,6 +91,16 @@ def register(registry, ctx) -> None:
             "episode_ref": args.get("episode_ref"),
             "author": "Jacob",
         }
+        # Automatic secondary signal alongside the human-set `rating` --
+        # sentiment.analyze was fully functional but never called by
+        # anything in the pipeline. Never let a sentiment hiccup block
+        # recording the feedback itself.
+        try:
+            sentiment_raw = call_tool("sentiment.analyze", {"text": entry["text"]})
+            sentiment = json.loads(sentiment_raw)
+            entry["sentiment"] = {"score": sentiment.get("score"), "label": sentiment.get("label")}
+        except Exception:
+            entry["sentiment"] = None
         with state_lock:
             soul.setdefault("creator_feedback", []).append(entry)
             soul["creator_feedback"] = soul["creator_feedback"][-50:]
@@ -137,6 +152,12 @@ def register(registry, ctx) -> None:
         goal_complete,
     )
     registry.register_from_def(
+        tool("goal.delete", "Permanently delete a goal.", {
+            "id": _p("string", "Goal ID"),
+        }),
+        goal_delete,
+    )
+    registry.register_from_def(
         tool("goal.plan", "Decompose a goal into ordered pursuit steps.", {
             "id": _p("string", "Goal ID (default: top open)", required=False),
             "max_steps": _p("integer", "Max steps (default 5)", required=False),
@@ -181,4 +202,105 @@ def register(registry, ctx) -> None:
         tool("goal.stall", "Mark a goal as stalled with an optional reason.",
              {"id": _p("string", "Goal ID"), "reason": _p("string", "Reason for stalling", required=False)}),
         goal_stall,
+    )
+
+    # ── State machine tools ───────────────────────────────────────────────────
+
+    def goal_review(args: dict) -> str:
+        """Manual sign-off: advance a goal from REVIEW to COMPLETED, CANCELLED, or back to ACTIVE."""
+        gid = args["id"]
+        if not goals.exists(gid):
+            return json.dumps({"ok": False, "error": f"Goal not found: {gid}"})
+        decision = args.get("decision", "").lower()
+        note = args.get("note", "")
+        if decision == "complete":
+            result = goals.mark_completed(gid, note)
+        elif decision == "cancel":
+            result = goals.mark_cancelled(gid, note)
+        elif decision == "continue":
+            result = goals.mark_active(gid)
+        elif decision == "supersede":
+            by_id = args.get("superseded_by", "")
+            if not by_id:
+                return json.dumps({"ok": False, "error": "superseded_by required when decision=supersede"})
+            result = goals.mark_superseded(gid, by_id)
+        else:
+            # Auto-check completion criteria
+            if goals.evaluate_completion(gid):
+                result = goals.mark_completed(gid, "auto-completed via criteria")
+            else:
+                return json.dumps({
+                    "ok": False,
+                    "status": "review",
+                    "message": "Completion criteria not met. Use decision=complete|cancel|continue|supersede.",
+                    "goal": goals.get(gid),
+                })
+        return json.dumps({"ok": True, "goal": result}, indent=2)
+
+    def goal_cancel(args: dict) -> str:
+        gid = args["id"]
+        if not goals.exists(gid):
+            return json.dumps({"ok": False, "error": f"Goal not found: {gid}"})
+        result = goals.mark_cancelled(gid, args.get("reason", ""))
+        return json.dumps({"ok": True, "goal": result}, indent=2)
+
+    def goal_supersede(args: dict) -> str:
+        gid = args["id"]
+        by_id = args["superseded_by"]
+        if not goals.exists(gid):
+            return json.dumps({"ok": False, "error": f"Goal not found: {gid}"})
+        result = goals.mark_superseded(gid, by_id)
+        return json.dumps({"ok": True, "goal": result}, indent=2)
+
+    def goal_archive(args: dict) -> str:
+        max_age = float(args.get("max_age_days", 7))
+        deleted = goals.auto_archive(max_age_days=max_age)
+        revived = goals.sweep_revivals(cooldown_hours=float(args.get("revival_cooldown_hours", 1.0)))
+        return json.dumps({"ok": True, "archived": deleted, "revived": revived}, indent=2)
+
+    def goal_generate_plan(args: dict) -> str:
+        gid = args["id"]
+        if not goals.exists(gid):
+            return json.dumps({"ok": False, "error": f"Goal not found: {gid}"})
+        steps = goals.generate_plan(gid)
+        return json.dumps({"ok": True, "plan": steps}, indent=2)
+
+    registry.register_from_def(
+        tool("goal.review", "Sign off on a goal in REVIEW state.",
+             {
+                 "id": _p("string", "Goal ID"),
+                 "decision": _p("string", "complete|cancel|continue|supersede (omit to auto-check criteria)", required=False),
+                 "note": _p("string", "Optional note or evidence", required=False),
+                 "superseded_by": _p("string", "ID of superseding goal (when decision=supersede)", required=False),
+             }),
+        goal_review,
+    )
+    registry.register_from_def(
+        tool("goal.cancel", "Explicitly cancel a goal.",
+             {
+                 "id": _p("string", "Goal ID"),
+                 "reason": _p("string", "Cancellation reason", required=False),
+             }),
+        goal_cancel,
+    )
+    registry.register_from_def(
+        tool("goal.supersede", "Mark a goal as superseded by a newer goal.",
+             {
+                 "id": _p("string", "Goal ID to supersede"),
+                 "superseded_by": _p("string", "ID of the newer goal"),
+             }),
+        goal_supersede,
+    )
+    registry.register_from_def(
+        tool("goal.archive", "Auto-archive old terminal goals and sweep stalled goals for revival.",
+             {
+                 "max_age_days": _p("number", "Archive terminal goals older than N days (default 7)", required=False),
+                 "revival_cooldown_hours": _p("number", "Promote stalled goals to revival after N hours (default 1)", required=False),
+             }),
+        goal_archive,
+    )
+    registry.register_from_def(
+        tool("goal.generate_plan", "Assign the default plan steps for a goal's kind.",
+             {"id": _p("string", "Goal ID")}),
+        goal_generate_plan,
     )
