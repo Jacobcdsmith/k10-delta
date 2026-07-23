@@ -23,6 +23,7 @@ from pathlib import Path
 import hashlib
 
 import websocket
+from dotenv import load_dotenv
 
 from cognition import (
     CognitionEngine, DreamEngine, MemeticEngine, AdversarialProber,
@@ -31,6 +32,7 @@ from cognition import (
 )
 from selfmod import SelfModEngine
 from chrono import ChronoEngine
+from kairos import KairosEngine
 from hermes_bridge import HermesBridge
 from store import (
     SOUL_PATH, EPISODES_PATH, NOTES_PATH, HYPO_PATH, DREAM_LOG, WORKSPACE,
@@ -51,11 +53,19 @@ from tools import skill_ns
 from tools import device_ns
 from tools import workflow_ns
 from tools import sentiment_ns
+from tools import utils_ns
+from tools import text_ns
+from tools import data_ns
 from tools import k10_ns
+from tools import kairos_ns
+from tools import ide_ns
 from goals import GoalStore, GOALS_PATH
+import supabase_sync
 from dashboard import configure as configure_dashboard, start_dashboard
 
 # ── Config ─────────────────────────────────────────────────────────────────────
+
+load_dotenv()
 
 K10_DIR = Path(__file__).resolve().parent
 SCHEDULE_PATH = K10_DIR / "schedule.json"
@@ -110,6 +120,7 @@ class HostState:
     prober: AdversarialProber
     selfmod: SelfModEngine
     chrono: ChronoEngine
+    kairos: KairosEngine
     hermes_bridge: HermesBridge
     ctx: types.SimpleNamespace
     dashboard_url: str
@@ -259,13 +270,15 @@ def boot() -> HostState:
     )
     engine.start()
 
+    kairos = KairosEngine(read_episodes, home=Path.home() / "kairos")
     chrono_globals = {
         "soul": soul, "save_soul": save_soul,
         "load_notes": load_notes, "save_notes": save_notes,
         "append_episode": append_episode, "read_episodes": read_episodes,
         "WORKSPACE": WORKSPACE, "hypotheses": hypotheses, "goals": goals,
         "engine": engine, "dream": dream, "memetic": memetic,
-        "prober": prober, "json": json, "Path": Path,
+        "prober": prober, "kairos": kairos,
+        "json": json, "Path": Path,
         "datetime": datetime, "timezone": timezone, "time": time,
     }
     chrono = ChronoEngine(SCHEDULE_PATH, soul, state_lock, globals_dict=chrono_globals)
@@ -297,6 +310,7 @@ def boot() -> HostState:
         prober=prober,
         selfmod=selfmod,
         chrono=chrono,
+        kairos=kairos,
         hermes_bridge=hermes_bridge,
         registry=registry,
         WORKSPACE=WORKSPACE,
@@ -320,6 +334,11 @@ def boot() -> HostState:
     workflow_ns.register(registry, ctx)
     sentiment_ns.register(registry, ctx)
     k10_ns.register(registry, ctx)
+    kairos_ns.register(registry, ctx)
+    ide_ns.register(registry, ctx)
+    utils_ns.register(registry, ctx)
+    text_ns.register(registry, ctx)
+    data_ns.register(registry, ctx)
 
     engine._update_identity_thread(
         _substantive_episodes(read_episodes(100)),
@@ -355,6 +374,7 @@ def boot() -> HostState:
         prober=prober,
         selfmod=selfmod,
         chrono=chrono,
+        kairos=kairos,
         hermes_bridge=hermes_bridge,
         ctx=ctx,
         dashboard_url="",
@@ -379,6 +399,16 @@ def boot() -> HostState:
 
     chrono.reset_last_run()
     chrono.start()
+
+    # Optional Supabase cloud sync
+    if supabase_sync.init():
+        supabase_sync.start_sync_thread(
+            get_soul=lambda: _state.soul,
+            get_goals=lambda: list(_state.goals._goals.values()),
+            get_episodes=lambda n: read_episodes(n),
+            stop_event=shutdown_requested,
+        )
+
     return _state
 
 
