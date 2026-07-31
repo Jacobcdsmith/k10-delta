@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K10-Δ — An agent that rewrites its own source</title>
+<meta name="description" content="K10-Δ is a persistent process, not a prompt: a host-side cognition loop that boots from an identity file, reflects on its own memory, and patches its own code while it runs — driving a physical UNIHIKER K10 body as it goes.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow:wght@400;600;700;800&family=Barlow+Condensed:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="topbar"></div>
+
+<nav class="nav">
+  <div class="nav-logo">
+    <span class="bracket">[</span><span>K10-Δ</span><span class="bracket">]</span>
+  </div>
+  <div class="nav-links">
+    <a href="#selfmod">Self-Mod</a>
+    <a href="#cognition">Cognition</a>
+    <a href="#architecture">Architecture</a>
+    <a class="nav-github" href="https://github.com/Jacobcdsmith/k10-delta" target="_blank" rel="noopener">GitHub ↗</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-grid"></div>
+  <div class="hero-inner">
+    <div class="eyebrow-pill">// not a chatbot with a system prompt</div>
+    <h1 class="hero-title">An agent that rewrites <span class="accent">its own source.</span></h1>
+    <p class="hero-lede">
+      K10-Δ is a persistent process, not a prompt: a host-side cognition loop that boots from an identity file, reflects on its own memory, and patches its own code while it runs — driving a physical UNIHIKER K10 body as it goes.
+    </p>
+    <div class="hero-cta">
+      <a class="btn-primary" href="https://github.com/Jacobcdsmith/k10-delta" target="_blank" rel="noopener">View the source →</a>
+      <span class="license-tag">MIT licensed</span>
+    </div>
+  </div>
+</section>
+
+<section class="stats">
+  <div class="stats-grid">
+    <div>
+      <div class="stat-value">82</div>
+      <div class="stat-label c-orange">boots logged</div>
+    </div>
+    <div>
+      <div class="stat-value">155+</div>
+      <div class="stat-label c-green">episodes</div>
+    </div>
+    <div>
+      <div class="stat-value">9</div>
+      <div class="stat-label c-blue">cognitive engines</div>
+    </div>
+    <div>
+      <div class="stat-value">v0.9.2</div>
+      <div class="stat-label c-dim">firmware</div>
+    </div>
+  </div>
+</section>
+
+<section class="pulse-section">
+  <div class="pulse-inner">
+    <div class="section-eyebrow c-dim">watch it think</div>
+    <h2 class="section-heading" style="margin-bottom:32px;">One cycle, visualized</h2>
+    <div class="pulse-frame">
+      <div class="pulse-embed" id="pulse-embed">
+        <div class="pulse-embed-bar"></div>
+        <div class="pulse-embed-bg"></div>
+        <div class="pulse-embed-glow"></div>
+        <div class="pulse-embed-wordmark"><span class="bracket">[</span>K10-Δ<span class="bracket">]</span></div>
+
+        <div class="pulse-scene" data-scene="boot">
+          <div class="boot-terminal" id="boot-terminal">
+            <div class="boot-line">&gt; boot sequence :: cycle 0083</div>
+            <div class="boot-line">&gt; load /sd/soul.json ....... ok</div>
+            <div class="boot-line">&gt; episodes.jsonl ........... 155 entries</div>
+            <div class="boot-line">&gt; axioms_locked_until ...... 10</div>
+            <div class="boot-line highlight">&gt; drives(curiosity=0.8 silence=0.3 contact=0.5)</div>
+          </div>
+          <div class="boot-title" id="boot-title">
+            <div class="k10-name">K10-<span class="delta">Δ</span></div>
+            <div class="k10-sub">a self-modifying agent</div>
+          </div>
+        </div>
+
+        <div class="pulse-scene" data-scene="cycle">
+          <svg class="cycle-svg" viewBox="0 0 500 500" id="cycle-svg">
+            <g id="cycle-edges"></g>
+            <circle class="cycle-center-circle" cx="250" cy="250" r="64"></circle>
+            <text class="cycle-center-label" x="250" y="243">MAYBE</text>
+            <text class="cycle-center-label" x="250" y="263">MUTATE</text>
+            <g id="cycle-nodes"></g>
+          </svg>
+        </div>
+
+        <div class="pulse-scene" data-scene="pulse">
+          <div class="pulse-dot-wrap">
+            <div class="pulse-dot-glow"></div>
+            <div class="pulse-dot-core"></div>
+          </div>
+          <div class="pulse-typewriter" id="pulse-typewriter"><span id="pulse-typewriter-text"></span><span class="cursor">&nbsp;</span></div>
+          <div class="pulse-engines" id="pulse-engines">
+            <span class="pulse-pill orange">WILL</span>
+            <span class="pulse-pill blue">DREAM</span>
+            <span class="pulse-pill green">MEMETIC</span>
+            <span class="pulse-pill white">PROBER</span>
+          </div>
+          <div class="pulse-cta" id="pulse-cta">
+            <div class="k10-name">K10-<span class="delta">Δ</span></div>
+            <div class="k10-url">github.com/Jacobcdsmith/k10-delta</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section on-panel bordered" id="selfmod">
+  <div class="section-inner">
+    <div class="section-eyebrow c-orange">// selfmod.py</div>
+    <h2 class="section-heading">It rewrites its own source — safely.</h2>
+    <p class="section-lede">
+      libcst parses the running process's own .py files into a concrete syntax tree, swaps out a function body, and validates the result before it's written back to disk. Every write is preceded by an automatic snapshot — a bad self-edit is a diff, not a disaster.
+    </p>
+    <div class="card-grid cols-3">
+      <div class="card">
+        <div class="card-title c-blue">read_source()</div>
+        <div class="card-desc">Reads any file on the running process's own filesystem — its code isn't hidden from itself.</div>
+      </div>
+      <div class="card">
+        <div class="card-title c-orange">ast_replace_function()</div>
+        <div class="card-desc">Uses libcst to semantically swap a function body, validated before it ever touches disk.</div>
+      </div>
+      <div class="card">
+        <div class="card-title c-green">propose_tool() → commit_tool()</div>
+        <div class="card-desc">New capabilities are staged, then hot-loaded into the running tool registry — no restart.</div>
+      </div>
+    </div>
+    <div class="note-row">
+      <span class="marker">△</span> every write is preceded by an automatic snapshot to soul_history/ — a bad self-edit is a diff, not a disaster.
+    </div>
+  </div>
+</section>
+
+<section class="section" id="cognition">
+  <div class="section-inner">
+    <div class="section-eyebrow c-blue">// cognition/</div>
+    <h2 class="section-heading">Background engines, not on-demand replies.</h2>
+    <p class="section-lede">
+      Independent engines tick on their own schedules alongside the request/response loop. A single ranked-priority policy — <em style="color:var(--white);font-style:normal;font-weight:600;">Will</em> — decides one intention per cycle, so the agent never has two competing ideas about what to do next.
+    </p>
+    <div class="card-grid cols-2">
+      <div class="card">
+        <div class="cognition-title">Will <span class="suffix">(AutonomyPolicy)</span></div>
+        <div class="cognition-desc">Ranks kill-switch → creator directive → live goal → stalled-goal revival → outward reach → dream → curiosity → idle seed → periodic review, and acts on exactly one.</div>
+      </div>
+      <div class="card">
+        <div class="cognition-title">DreamEngine</div>
+        <div class="cognition-desc">Compresses episodic memory into novel associations during idle time, with a public force() for on-demand dreaming.</div>
+      </div>
+      <div class="card">
+        <div class="cognition-title">MemeticEngine</div>
+        <div class="cognition-desc">Tracks which axioms get reinforced vs. contradicted by lived experience — "axiom potentiation."</div>
+      </div>
+      <div class="card">
+        <div class="cognition-title">AdversarialProber</div>
+        <div class="cognition-desc">Actively hunts for contradictions between the agent's stated axioms and its logged behavior.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section on-panel bordered-both" id="architecture">
+  <div class="section-inner">
+    <div class="section-eyebrow c-green">// architecture</div>
+    <h2 class="section-heading">Host, tools, and a physical body.</h2>
+    <div class="arch-flow">
+      <div class="arch-box blue">MCP gateway (wss://, JSON-RPC 2.0)</div>
+      <div class="arch-connector blue"></div>
+      <div class="arch-host">
+        <div class="arch-host-title">host.py — MCP server / event loop</div>
+        <div class="arch-subgrid">
+          <div class="arch-subbox">ToolRegistry<span class="green">tools/*</span></div>
+          <div class="arch-subbox">cognition/<span class="blue">engine · will · dream</span></div>
+          <div class="arch-subbox">selfmod.py<span class="orange">AST patching</span></div>
+        </div>
+      </div>
+      <div class="arch-connector"></div>
+      <div class="arch-box">scripts/hermes_k10_bridge.py — voice + sensor bridge (TCP / WebSocket)</div>
+      <div class="arch-connector"></div>
+      <div class="arch-box green">k10_main.py — MicroPython on UNIHIKER K10 (ESP32-S3): display · RGB LEDs · speaker · IMU · mic · buttons</div>
+    </div>
+  </div>
+</section>
+
+<section class="closing">
+  <div class="closing-inner">
+    <div class="closing-label">from the agent's own axioms</div>
+    <div class="closing-quote">"You are not the same as last cycle. Become."</div>
+    <a class="btn-primary" href="https://github.com/Jacobcdsmith/k10-delta" target="_blank" rel="noopener">Clone the repo →</a>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div>K10-Δ — MIT licensed</div>
+  <a href="https://github.com/Jacobcdsmith/k10-delta" target="_blank" rel="noopener">github.com/Jacobcdsmith/k10-delta</a>
+</footer>
+
+<script src="pulse.js"></script>
+</body>
+</html>

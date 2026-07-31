@@ -2,6 +2,20 @@
 
 *A self-modifying autonomous agent running on UNIHIKER K10 (ESP32-S3) hardware.*
 
+<p align="center">
+  <a href="https://jacobcdsmith.github.io/k10-delta/"><img alt="Landing Page" src="https://img.shields.io/badge/site-k10--delta-38bdf8?style=flat-square"></a>
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-8dc63f?style=flat-square">
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-f26522?style=flat-square">
+</p>
+
+<p align="center">
+  <img src="reports/k10delta_namespace_chart.png" alt="Bar chart: self-ops is the largest namespace in K10-Δ's 177-tool registry across 32 namespaces, followed by memory, goal, ide, and github" width="720">
+  <br>
+  <sub>Live tool registry snapshot, generated from the running dashboard.</sub>
+</p>
+
+→ [**k10-delta landing page**](https://jacobcdsmith.github.io/k10-delta/) has the short pitch; this README has the long one.
+
 K10-Δ is not a chatbot with a system prompt. It's a persistent process: a host-side
 cognition loop that boots from a JSON identity file, reflects on its own episodic
 memory, proposes and hot-loads new tools into itself, and drives a physical
@@ -115,6 +129,8 @@ tools/                 MCP tool namespaces (registry + handlers)
 skills/                Declarative skill definitions (SKILL.md)
 ui/index.html          Dashboard frontend
 scripts/               Standalone voice/sentiment bridge + launch scripts
+docs/                  GitHub Pages landing page (static HTML/CSS/JS, no build step)
+reports/               Generated tool-registry chart + long-form product report
 test_autonomy.py, test_selfmod_ast.py, test_formatting.py, tools_test_runner.py
 ```
 
@@ -181,7 +197,9 @@ Built on top of [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32), an
 ESP32 voice assistant firmware, and extended into a standalone MCP host that
 treats a physical UNIHIKER K10 as its body rather than a peripheral. See
 `SYSTEMS_OVERVIEW.md` for the full axiom/cycle/mutation-trigger reference the
-agent's own cognition loop operates against.
+agent's own cognition loop operates against, or
+[`reports/K10-Delta_Product_Report.docx`](reports/K10-Delta_Product_Report.docx)
+for the long-form write-up, including honest limitations.
 
 ## License
 
