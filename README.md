@@ -62,6 +62,37 @@ file, not a fixture.
   append-only memory log; the dream/memetic engines compress and cross-link it
   over time.
 
+## Software review snapshot (2026-08)
+
+This codebase is in solid shape for an experimental autonomous system and is
+already stronger than a typical "agent demo" in structure and safeguards.
+
+### Strengths
+
+- **Clear modular boundaries:** host loop, cognition engines, persistence,
+  tool namespaces, and firmware are separated cleanly (`host.py`, `cognition/`,
+  `store.py`, `tools/`, `k10_main.py`).
+- **Thoughtful self-mod safety rails:** `selfmod.py` applies path/extension
+  restrictions, syntax validation, and automatic backups before writes.
+- **Good local verification coverage:** targeted pytest files plus
+  `tools_test_runner.py` provide practical smoke coverage for both autonomy and
+  tool surface behavior.
+
+### Main risks / gaps
+
+- **Operational risk remains high by design:** dynamic self-modification and
+  shell/network-capable tools still require strict deployment boundaries.
+- **Hardware/cloud coupling:** full behavior depends on K10 hardware and
+  gateway connectivity, so reproducibility is lower in pure local environments.
+- **No visible CI workflow in-repo:** validation appears locally script-driven;
+  adding CI would improve baseline confidence for contributors.
+
+### Recommended next steps
+
+1. Add CI to run pytest + tool smoke tests on every PR.
+2. Add a short threat-model checklist for high-risk tool namespaces.
+3. Add a "local simulation profile" to make non-hardware development easier.
+
 ## Architecture
 
 ```
