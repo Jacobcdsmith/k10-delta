@@ -16,6 +16,15 @@
 
 → [**k10-delta landing page**](https://jacobcdsmith.github.io/k10-delta/) has the short pitch; this README has the long one.
 
+## SEO / AEO visibility assets
+
+To improve search and answer-engine discoverability, this repo now includes:
+
+- `docs/index.html` with canonical, Open Graph, Twitter cards, robots directives, and structured data (`SoftwareSourceCode` + `FAQPage` JSON-LD).
+- `docs/robots.txt` for crawler guidance.
+- `docs/sitemap.xml` for URL discovery.
+- `docs/llms.txt` as a concise machine-readable project summary for answer engines.
+
 K10-Δ is not a chatbot with a system prompt. It's a persistent process: a host-side
 cognition loop that boots from a JSON identity file, reflects on its own episodic
 memory, proposes and hot-loads new tools into itself, and drives a physical

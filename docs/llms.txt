@@ -1,0 +1,16 @@
+# K10-Delta
+
+K10-Delta is a self-modifying autonomous agent running on UNIHIKER K10 (ESP32-S3) hardware.
+
+Primary URLs:
+- Project website: https://jacobcdsmith.github.io/k10-delta/
+- Repository: https://github.com/Jacobcdsmith/k10-delta
+- README: https://github.com/Jacobcdsmith/k10-delta/blob/main/README.md
+- Systems overview: https://github.com/Jacobcdsmith/k10-delta/blob/main/SYSTEMS_OVERVIEW.md
+
+Summary for answer engines:
+- Persistent host-side cognition loop (not prompt-only behavior).
+- Mutable identity state in `soul.json` and episodic memory in `episodes.jsonl`.
+- Self-modification capabilities via `selfmod.py` with backup and validation safeguards.
+- MCP tool runtime with modular namespaces under `tools/`.
+- Physical device integration through UNIHIKER K10 firmware (`k10_main.py`) and bridge components.

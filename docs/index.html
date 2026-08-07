@@ -5,6 +5,76 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>K10-Δ — An agent that rewrites its own source</title>
 <meta name="description" content="K10-Δ is a persistent process, not a prompt: a host-side cognition loop that boots from an identity file, reflects on its own memory, and patches its own code while it runs — driving a physical UNIHIKER K10 body as it goes.">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+<meta name="keywords" content="K10-Delta, K10-Δ, autonomous agent, self-modifying agent, MCP server, UNIHIKER K10, ESP32-S3, Model Context Protocol, agent architecture, cognition engine">
+<link rel="canonical" href="https://jacobcdsmith.github.io/k10-delta/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="K10-Δ">
+<meta property="og:title" content="K10-Δ — An agent that rewrites its own source">
+<meta property="og:description" content="A persistent self-modifying autonomous agent with a host-side cognition loop, hot-loaded tools, and a physical UNIHIKER K10 body.">
+<meta property="og:url" content="https://jacobcdsmith.github.io/k10-delta/">
+<meta property="og:image" content="https://jacobcdsmith.github.io/k10-delta/reports/k10delta_namespace_chart.png">
+<meta property="og:image:alt" content="K10-Δ tool registry chart">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="K10-Δ — An agent that rewrites its own source">
+<meta name="twitter:description" content="A persistent self-modifying autonomous agent with cognition, tool hot-loading, and K10 hardware integration.">
+<meta name="twitter:image" content="https://jacobcdsmith.github.io/k10-delta/reports/k10delta_namespace_chart.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareSourceCode",
+  "name": "K10-Delta",
+  "alternateName": "K10-Δ",
+  "codeRepository": "https://github.com/Jacobcdsmith/k10-delta",
+  "url": "https://jacobcdsmith.github.io/k10-delta/",
+  "description": "A self-modifying autonomous agent running on UNIHIKER K10 (ESP32-S3), with a host-side cognition loop and MCP tool runtime.",
+  "programmingLanguage": "Python",
+  "license": "https://github.com/Jacobcdsmith/k10-delta/blob/main/LICENSE",
+  "keywords": [
+    "autonomous agent",
+    "self-modifying software",
+    "Model Context Protocol",
+    "UNIHIKER K10",
+    "ESP32-S3"
+  ],
+  "creator": {
+    "@type": "Person",
+    "name": "Jacob C. D. Smith"
+  }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is K10-Delta?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "K10-Delta is a persistent autonomous agent that can reflect on memory, self-modify selected source files, and interact with physical UNIHIKER K10 hardware."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does K10-Delta self-modify safely?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It uses libcst-based function replacement, syntax validation, extension restrictions, and automatic source backups before writing changes."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which protocol does K10-Delta use for tools?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It uses Model Context Protocol (MCP) over JSON-RPC 2.0 and WebSocket for gateway and tool interactions."
+      }
+    }
+  ]
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow:wght@400;600;700;800&family=Barlow+Condensed:wght@700;800&display=swap" rel="stylesheet">
@@ -203,6 +273,31 @@
     <div class="closing-label">from the agent's own axioms</div>
     <div class="closing-quote">"You are not the same as last cycle. Become."</div>
     <a class="btn-primary" href="https://github.com/Jacobcdsmith/k10-delta" target="_blank" rel="noopener">Clone the repo →</a>
+  </div>
+</section>
+
+<section class="section on-panel" id="faq">
+  <div class="section-inner">
+    <div class="section-eyebrow c-dim">// faq</div>
+    <h2 class="section-heading">Quick answers</h2>
+    <div class="card-grid cols-2">
+      <article class="card">
+        <h3 class="cognition-title">What is K10-Δ?</h3>
+        <p class="cognition-desc">K10-Δ is a persistent autonomous agent that boots from identity state, reflects on episodic memory, and can update its own runtime capabilities.</p>
+      </article>
+      <article class="card">
+        <h3 class="cognition-title">What makes it different?</h3>
+        <p class="cognition-desc">It combines background cognition engines, self-modification tooling, and physical UNIHIKER K10 hardware behavior in one continuously running process.</p>
+      </article>
+      <article class="card">
+        <h3 class="cognition-title">Is it safe by default?</h3>
+        <p class="cognition-desc">The project includes backup-before-write and syntax-validation safeguards, but still requires strict token scoping and constrained runtime permissions.</p>
+      </article>
+      <article class="card">
+        <h3 class="cognition-title">How can I evaluate it quickly?</h3>
+        <p class="cognition-desc">Read the README architecture section, run the included pytest targets, and open the dashboard to inspect the live tool registry and cognition telemetry.</p>
+      </article>
+    </div>
   </div>
 </section>
 
