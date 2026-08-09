@@ -32,7 +32,13 @@ from cognition import (
 )
 from selfmod import SelfModEngine
 from chrono import ChronoEngine
-from kairos import KairosEngine
+try:
+    from kairos import KairosEngine
+except ImportError:
+    class KairosEngine:
+        def __init__(self, read_episodes=None, home=None):
+            self.read_episodes = read_episodes
+            self.home = home
 from hermes_bridge import HermesBridge
 from store import (
     SOUL_PATH, EPISODES_PATH, NOTES_PATH, HYPO_PATH, DREAM_LOG, WORKSPACE,

@@ -27,7 +27,7 @@ import sys
 import time
 from pathlib import Path
 
-from schema import _p, tool
+from .schema import _p, tool
 
 
 def _run(cmd: list[str], cwd: str | None = None, timeout: int = 30) -> dict:
