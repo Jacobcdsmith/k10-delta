@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
 from goals import GoalStore
+
+log = logging.getLogger("k10d.goals")
 
 CallTool = Callable[[str, dict], Any]
 
@@ -67,16 +70,19 @@ def _verify_deliver_result(result: Any) -> bool:
 
 
 def _is_hermes_in_flight(action: str, result: Any) -> bool:
-    """True if a hermes step returned early because the query is still
-    running (see hermes_bridge.HermesBridge.query's poll_timeout) -- this
-    is neither success nor failure, just "still working"."""
-    if action != "hermes":
+    if action not in ("hermes", "poll_hermes"):
         return False
     try:
         parsed = json.loads(result) if isinstance(result, str) else result
     except Exception:
         return False
-    return isinstance(parsed, dict) and parsed.get("in_flight") is True
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("in_flight") is True:
+        return True
+    if parsed.get("status") == "running":
+        return True
+    return False
 
 
 def _result_ok(result: Any, action: str | None = None) -> bool:
@@ -115,6 +121,28 @@ class GoalPursuitService:
             parts.append(f"\n## Evidence trail\n{trail or '(no prior evidence)'}")
         return "\n".join(parts)
 
+    def _get_latest_hermes_query_id(self, goal: dict) -> dict:
+        step_results = goal.get("step_results") or {}
+        hermes_result = step_results.get("hermes", {})
+        hermes_text = hermes_result.get("text", "")
+        try:
+            parsed = json.loads(hermes_text) if isinstance(hermes_text, str) else hermes_text
+            if isinstance(parsed, dict) and parsed.get("query_id"):
+                return {"query_id": parsed["query_id"]}
+        except Exception:
+            pass
+        for ev in reversed(goal.get("evidence", [])):
+            ev_text = str(ev.get("text", ""))
+            if "hermes" in ev_text and "query_id" in ev_text:
+                try:
+                    import re
+                    match = re.search(r"query_id[=:]\s*([a-zA-Z0-9_]+)", ev_text)
+                    if match:
+                        return {"query_id": match.group(1)}
+                except Exception:
+                    pass
+        return {"query_id": ""}
+
     def _build_step(self, action: str, goal: dict) -> tuple[str, dict]:
         """Map a pursuit action to (tool_name, args)."""
         text = goal["text"]
@@ -135,7 +163,7 @@ class GoalPursuitService:
                 {"topic": text},
             ),
             "hermes": (
-                "hermes.query",
+                "hermes.query_async",
                 {
                     "prompt": (
                         f"Deliver concrete output for this goal:\n{text}\n\n"
@@ -143,6 +171,10 @@ class GoalPursuitService:
                     ),
                     "timeout": 180,
                 },
+            ),
+            "poll_hermes": (
+                "hermes.poll",
+                self._get_latest_hermes_query_id(goal),
             ),
             "deliver": (
                 "act.deliver",
@@ -225,7 +257,7 @@ class GoalPursuitService:
         tool_name = step.get("tool") or ""
         # Prefer action dispatcher; fall back to raw tool if unknown action
         known = {
-            "search", "fetch", "synthesise", "hermes", "deliver", "plan", "pursue",
+            "search", "fetch", "synthesise", "hermes", "poll_hermes", "deliver", "plan", "pursue",
         }
         if action == "pursue":
             result = self.call_tool(
@@ -408,6 +440,27 @@ class GoalPursuitService:
             indent=2,
         )
 
+    def _record_step_exception(self, gid: str, action: str, exc: Exception) -> str:
+        """A pursuit step *raised* (vs. returning a graceful ok:false payload).
+
+        Route it through the same circuit breaker as a graceful failure so the
+        exception can't propagate out of pursue() — which would skip
+        record_failure() entirely and leave the goal wedged at status="active",
+        re-picked and re-raising every tick until the age-based stale sweep.
+        """
+        self.goals.record_failure(
+            gid, reason=f"{action}: raised {type(exc).__name__}: {exc}")
+        if self.goals.failure_count(gid) >= MAX_FAILURES:
+            self.goals.mark_stalled(
+                gid, "Goal stalled after 3+ consecutive pursue failures")
+        log.warning("Goal %s step %r raised: %s", gid, action, exc)
+        return json.dumps({
+            "ok": False,
+            "goal": self.goals.get(gid),
+            "step": action,
+            "error": str(exc)[:800],
+        }, indent=2)
+
     def pursue(self, args: dict) -> str:
         """Take one concrete step on the highest-priority open goal (or args id)."""
         goal = self._resolve_goal(args) if args.get("id") else self.goals.top_open()
@@ -431,7 +484,12 @@ class GoalPursuitService:
                 "msg": f"Goal {gid} stalled after 3+ consecutive failures",
             })
 
-        self.goals.update(gid, status="in_progress")
+        # Canonical ACTIVE transition. Do NOT write the legacy "in_progress"
+        # alias here: GoalStore.update() stores it raw, and top_open() /
+        # Will._live_goals() query the canonical "active" — a raw "in_progress"
+        # matches neither, orphaning the goal (invisible to pursuit AND to the
+        # failure→stall breaker, which is gated on status == "active").
+        self.goals.mark_active(gid)
         goal = self.goals.get(gid)
 
         step = str(args.get("step", "auto") or "auto").strip().lower()
@@ -450,8 +508,11 @@ class GoalPursuitService:
                 })
             if not isinstance(tool_args, dict):
                 return json.dumps({"ok": False, "msg": "args must be a dict"})
-            result = self.call_tool(str(tool_name), tool_args)
             action = f"tool:{tool_name}"
+            try:
+                result = self.call_tool(str(tool_name), tool_args)
+            except Exception as e:
+                return self._record_step_exception(gid, action, e)
             self.goals.add_evidence(gid, f"{action}: {str(result)[:200]}")
             self.goals.set_step_result(gid, action, result)
             if _result_ok(result, action):
@@ -480,7 +541,11 @@ class GoalPursuitService:
         if step == "auto" and plan:
             next_step = next((s for s in plan if not s.get("executed")), None)
             if next_step:
-                action, result = self._run_plan_step(goal, next_step)
+                try:
+                    action, result = self._run_plan_step(goal, next_step)
+                except Exception as e:
+                    return self._record_step_exception(
+                        gid, next_step.get("action") or "auto", e)
                 in_flight = _is_hermes_in_flight(action, result)
                 if not in_flight:
                     self._mark_plan_step_done(gid, plan, next_step)
@@ -513,14 +578,17 @@ class GoalPursuitService:
                     indent=2,
                 )
 
-        known_steps = {"search", "fetch", "synthesise", "hermes", "deliver"}
-        if step in known_steps:
-            action, result = self._dispatch(step, goal)
-        elif step == "auto":
-            action, result = self._pick_auto_step(goal, prior)
-        else:
-            # Unknown step → synthesise (legacy default)
-            action, result = self._dispatch("synthesise", goal)
+        known_steps = {"search", "fetch", "synthesise", "hermes", "poll_hermes", "deliver"}
+        try:
+            if step in known_steps:
+                action, result = self._dispatch(step, goal)
+            elif step == "auto":
+                action, result = self._pick_auto_step(goal, prior)
+            else:
+                # Unknown step → synthesise (legacy default)
+                action, result = self._dispatch("synthesise", goal)
+        except Exception as e:
+            return self._record_step_exception(gid, step, e)
 
         in_flight = _is_hermes_in_flight(action, result)
         evidence_text = (

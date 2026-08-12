@@ -122,7 +122,11 @@ class TestWill(unittest.TestCase):
             goals.mark_stalled(g["id"], "test stall")
             report = will.tick(20, CALM)
             self.assertEqual(report["intention"]["kind"], "revive")
-            self.assertEqual(goals.get(g["id"])["status"], "open")
+            # A revived goal must land in a canonical live status (spawned),
+            # visible to top_open()/Will._live_goals(). The raw legacy "open"
+            # alias matches no canonical query and would orphan the goal.
+            self.assertEqual(goals.get(g["id"])["status"], "spawned")
+            self.assertIsNotNone(goals.top_open())
             # Exhaust budget
             goals.mark_stalled(g["id"], "again")
             soul["autonomy"]["stall_revive_max"] = 1

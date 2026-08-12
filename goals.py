@@ -357,6 +357,12 @@ class GoalStore:
     def update(self, gid: str, **fields) -> dict:
         with self._lock:
             g = self._require(gid)
+            # Normalize legacy status aliases on write (e.g. "in_progress" →
+            # "active") so stored status always matches the canonical values
+            # that list_all()/top_open() query against.
+            if "status" in fields:
+                fields["status"] = _LEGACY_STATUS_MAP.get(
+                    fields["status"], fields["status"])
             for key in ("text", "status", "priority", "source", "kind", "completion_criteria"):
                 if key in fields:
                     g[key] = fields[key]

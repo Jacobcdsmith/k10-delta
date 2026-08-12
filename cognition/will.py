@@ -5,6 +5,7 @@ continuity via identity_thread / rising_concepts / dream_facts / workspace.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import asdict, dataclass
@@ -47,6 +48,9 @@ WILL_DEFAULTS: dict[str, Any] = {
     "review_interval_cycles": 10,
     "hypo_cooldown_cycles": 15,
     "max_open_will_hypotheses": 2,
+    "retry_max_attempts": 2,
+    "retry_base_delay_s": 1.0,
+    "retry_on_tools": ("net.search", "net.fetch", "hermes.query", "hermes.query_async"),
 }
 
 # Compat alias for tests / older call sites.
@@ -437,75 +441,112 @@ class AutonomyPolicy:
             "text": intention.text[:120],
         }
 
-        try:
-            if kind == "pursue" or (kind == "act" and intention.tool):
-                tool = intention.tool
-                args = intention.args or {}
-                if not tool:
-                    raise ValueError("act/pursue requires tool")
-                result = self.call_tool(tool, args)
-                action["tool"] = tool
-                action["args"] = args
-                if intention.goal_id:
-                    action["goal_id"] = intention.goal_id
+        retry_max = int(auto.get("retry_max_attempts", 2))
+        retry_delay = float(auto.get("retry_base_delay_s", 1.0))
+        retry_tools = set(auto.get("retry_on_tools", ()))
 
-            elif kind == "dream":
-                force = getattr(self.dream, "force", None)
-                if not callable(force):
-                    ok = False
-                    error = "dream.force unavailable"
+        attempts = 0
+        last_error: str | None = None
+
+        while attempts < max(1, retry_max):
+            attempts += 1
+            try:
+                if kind == "pursue" or (kind == "act" and intention.tool):
+                    tool = intention.tool
+                    args = intention.args or {}
+                    if not tool:
+                        raise ValueError("act/pursue requires tool")
+                    result = self.call_tool(tool, args)
+                    action["tool"] = tool
+                    action["args"] = args
+                    if intention.goal_id:
+                        action["goal_id"] = intention.goal_id
+
+                    try:
+                        parsed = json.loads(result) if isinstance(result, str) else result
+                        if isinstance(parsed, dict) and parsed.get("ok") is False and parsed.get("error"):
+                            last_error = str(parsed.get("error", ""))[:200]
+                            if tool in retry_tools and attempts < retry_max:
+                                log.info("Will: retryable error on %s (attempt %d/%d): %s",
+                                         tool, attempts, retry_max, last_error)
+                                time.sleep(retry_delay * (2 ** (attempts - 1)))
+                                continue
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                elif kind == "dream":
+                    force = getattr(self.dream, "force", None)
+                    if not callable(force):
+                        ok = False
+                        error = "dream.force unavailable"
+                    else:
+                        force()
+                        self._low_novelty_streak = 0
+                        action["action"] = "dream_force"
+
+                elif kind == "revive":
+                    gid = intention.goal_id
+                    if not gid or not self.goals:
+                        raise ValueError("revive requires goal_id and goals store")
+                    revival_n = int((intention.args or {}).get("revival", 1))
+                    self.goals.update(gid, status="open")
+                    self.goals.add_evidence(
+                        gid,
+                        f"will: revival #{revival_n} (no active goals)",
+                    )
+                    action["id"] = gid
+                    action["action"] = "goal_revive"
+                    action["revival"] = revival_n
+                    result = {"id": gid, "status": "open", "revival": revival_n}
+
+                elif kind == "spawn_hypo":
+                    h = self.hypotheses.spawn(intention.text, source="will")
+                    self._last_hypo_cycle = cycle
+                    action["action"] = "hypothesis_seed"
+                    action["id"] = h.get("id")
+                    action["text"] = intention.text[:120]
+                    result = h
+
+                elif kind == "seed":
+                    goal = self.goals.add(
+                        intention.text,
+                        source="will",
+                        priority=int((intention.args or {}).get("priority", 6)),
+                    )
+                    action["action"] = "goal_seed"
+                    action["id"] = goal.get("id")
+                    action["text"] = intention.text[:120]
+                    intention.goal_id = goal.get("id")
+                    result = goal
+
+                elif kind in ("none", "review"):
+                    action["action"] = kind
+                    result = None
+
                 else:
-                    force()
-                    self._low_novelty_streak = 0
-                    action["action"] = "dream_force"
+                    ok = False
+                    error = f"unknown intention kind: {kind}"
 
-            elif kind == "revive":
-                gid = intention.goal_id
-                if not gid or not self.goals:
-                    raise ValueError("revive requires goal_id and goals store")
-                revival_n = int((intention.args or {}).get("revival", 1))
-                self.goals.update(gid, status="open")
-                self.goals.add_evidence(
-                    gid,
-                    f"will: revival #{revival_n} (no active goals)",
-                )
-                action["id"] = gid
-                action["action"] = "goal_revive"
-                action["revival"] = revival_n
-                result = {"id": gid, "status": "open", "revival": revival_n}
+                if ok and error is None:
+                    break
 
-            elif kind == "spawn_hypo":
-                h = self.hypotheses.spawn(intention.text, source="will")
-                self._last_hypo_cycle = cycle
-                action["action"] = "hypothesis_seed"
-                action["id"] = h.get("id")
-                action["text"] = intention.text[:120]
-                result = h
-
-            elif kind == "seed":
-                goal = self.goals.add(
-                    intention.text,
-                    source="will",
-                    priority=int((intention.args or {}).get("priority", 6)),
-                )
-                action["action"] = "goal_seed"
-                action["id"] = goal.get("id")
-                action["text"] = intention.text[:120]
-                intention.goal_id = goal.get("id")
-                result = goal
-
-            elif kind in ("none", "review"):
-                action["action"] = kind
-                result = None
-
-            else:
+            except Exception as e:
+                last_error = str(e)
+                tool = intention.tool if intention.tool else ""
+                if tool in retry_tools and attempts < retry_max:
+                    log.info("Will: exception on %s (attempt %d/%d): %s",
+                             tool, attempts, retry_max, last_error)
+                    time.sleep(retry_delay * (2 ** (attempts - 1)))
+                    continue
                 ok = False
-                error = f"unknown intention kind: {kind}"
+                error = last_error
+                log.warning("Will execute %s failed: %s", kind, e)
+                break
 
-        except Exception as e:
-            ok = False
-            error = str(e)
-            log.warning("Will execute %s failed: %s", kind, e)
+        if last_error and not ok:
+            error = last_error
+        if attempts > 1:
+            action["attempts"] = attempts
 
         action["ok"] = ok
         if error:
@@ -513,7 +554,6 @@ class AutonomyPolicy:
         preview = _preview(result)
         action["result_preview"] = preview
 
-        # Counters
         counters = auto.setdefault("counters", {})
         if ok and kind not in ("none", "review"):
             key = {
@@ -526,6 +566,10 @@ class AutonomyPolicy:
             }.get(kind)
             if key:
                 counters[key] = counters.get(key, 0) + 1
+        if attempts > 1 and ok:
+            counters["retries_succeeded"] = counters.get("retries_succeeded", 0) + 1
+        elif attempts > 1 and not ok:
+            counters["retries_failed"] = counters.get("retries_failed", 0) + 1
 
         return {
             "action": action,
