@@ -110,7 +110,7 @@ def register(registry, ctx) -> None:
 
     registry.register_from_def(
         tool(
-            "self.get_device_status",
+            "host.get_device_status",
             "Host or K10 device status. Omits fields that cannot be read (no fake defaults).",
             {},
         ),

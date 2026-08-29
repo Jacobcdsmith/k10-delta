@@ -49,10 +49,17 @@ _LEGACY_STATUS_MAP = {"open": "spawned", "in_progress": "active", "done": "compl
 
 # Default plan steps per goal kind
 _DEFAULT_PLANS: dict[str, list[str]] = {
-    "research":  ["search", "hermes", "synthesise", "review"],
-    "delivery":  ["tool", "deliver", "review"],
-    "general":   ["search", "hermes", "review"],
-    "open":      ["hermes", "review"],
+    "research":     ["search", "hermes", "synthesise", "review"],
+    "delivery":     ["tool", "deliver", "review"],
+    "general":      ["search", "hermes", "review"],
+    "open":         ["hermes", "review"],
+    # Zero-arg, read-only status/introspection actions -- action names must
+    # match goals_pursuit.py's _build_step builders and _KIND_TEMPLATES so
+    # an explicit kind="status_check" isn't clamped back to "open" before
+    # goals_pursuit.py ever sees it (goals_pursuit.py's own keyword-hint
+    # fallback in _resolve_kind reaches this kind too, independently of
+    # this dict, by matching goal text rather than the stored kind field).
+    "status_check": ["device_status", "sensor_poll", "kairos_phase"],
 }
 
 
@@ -113,7 +120,12 @@ class GoalStore:
             kind = "open"
         with self._lock:
             for g in self._store.values():
-                if g["text"].lower() == text.lower():
+                # Skip terminal goals when deduping: otherwise a fixed-text
+                # repeating seeder (e.g. the outward_pressure cron) silently
+                # self-disables the moment its goal first completes/cancels,
+                # because add() would keep returning the terminal goal.
+                if (g["text"].lower() == text.lower()
+                        and g.get("status") not in TERMINAL_STATUSES):
                     return dict(g)
             if len(self._store) >= MAX_GOALS:
                 self._prune_terminal()
@@ -213,6 +225,11 @@ class GoalStore:
             g["status"] = "revival"
             g["revival_count"] = int(g.get("revival_count", 0)) + 1
             g["consecutive_failures"] = 0
+            # Also reset the cumulative `failures` field: the pursue circuit
+            # breaker gates on failure_count() (= total failures), so leaving
+            # it >= MAX_FAILURES would re-stall the revived goal before it runs
+            # a single step, making revival dead on arrival.
+            g["failures"] = 0
             g["plan"] = self._default_plan(g.get("kind", "open"))
             g["updated"] = _now_iso()
             self._save()
@@ -363,7 +380,8 @@ class GoalStore:
             if "status" in fields:
                 fields["status"] = _LEGACY_STATUS_MAP.get(
                     fields["status"], fields["status"])
-            for key in ("text", "status", "priority", "source", "kind", "completion_criteria"):
+            for key in ("text", "status", "priority", "source", "kind",
+                        "completion_criteria", "revival_count"):
                 if key in fields:
                     g[key] = fields[key]
             g["updated"] = _now_iso()
@@ -413,6 +431,7 @@ class GoalStore:
                     g["status"] = "revival"
                     g["revival_count"] = int(g.get("revival_count", 0)) + 1
                     g["consecutive_failures"] = 0
+                    g["failures"] = 0  # see mark_revival: breaker keys on this
                     g["plan"] = self._default_plan(g.get("kind", "open"))
                     g["updated"] = _now_iso()
                     promoted.append(gid)

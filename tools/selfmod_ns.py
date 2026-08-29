@@ -37,6 +37,11 @@ _CAPABILITY_HINTS: dict[str, list[str]] = {
     "schedule": ["cron.schedule"],
     "cron": ["cron.schedule"],
     "goal": ["goal.pursue", "goal.list"],
+    "sensor": ["sensor.poll", "host.get_device_status"],
+    "status": ["host.get_device_status"],
+    "temperature": ["sensor.poll"],
+    "humidity": ["sensor.poll"],
+    "uptime": ["host.get_device_status"],
 }
 
 
@@ -141,6 +146,9 @@ def register(registry, ctx) -> None:
             selfmod.revoke_tool(args["name"], unregister_fn=registry.unregister),
             indent=2,
         )
+
+    def health_check(args: dict) -> str:
+        return json.dumps(selfmod.health_check_tool(args["name"]), indent=2)
 
     def usage_stats(args: dict) -> str:
         return json.dumps(registry.get_usage_stats(), indent=2)
@@ -363,6 +371,14 @@ def register(registry, ctx) -> None:
             {"name": _p("string", "Tool name")},
         ),
         revoke_tool,
+    )
+    registry.register_from_def(
+        tool(
+            "self.health_check",
+            "Verify a loaded tool's handler is callable and doesn't crash.",
+            {"name": _p("string", "Tool name to health-check")},
+        ),
+        health_check,
     )
     registry.register_from_def(tool("self.usage_stats", "Tool usage statistics: top tools, tier counts, never-called."), usage_stats)
     registry.register_from_def(
