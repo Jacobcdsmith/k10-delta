@@ -59,7 +59,7 @@ _DEFAULT_PLANS: dict[str, list[str]] = {
     # goals_pursuit.py ever sees it (goals_pursuit.py's own keyword-hint
     # fallback in _resolve_kind reaches this kind too, independently of
     # this dict, by matching goal text rather than the stored kind field).
-    "status_check": ["device_status", "sensor_poll", "kairos_phase"],
+    "status_check": ["device_status", "sensor_poll"],
 }
 
 

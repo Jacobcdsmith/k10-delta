@@ -493,7 +493,7 @@ class AutonomyPolicy:
                     if not gid or not self.goals:
                         raise ValueError("revive requires goal_id and goals store")
                     revival_n = int((intention.args or {}).get("revival", 1))
-                    self.goals.update(gid, status="open")
+                    revived = self.goals.mark_revival(gid)
                     self.goals.add_evidence(
                         gid,
                         f"will: revival #{revival_n} (no active goals)",
@@ -501,7 +501,7 @@ class AutonomyPolicy:
                     action["id"] = gid
                     action["action"] = "goal_revive"
                     action["revival"] = revival_n
-                    result = {"id": gid, "status": "open", "revival": revival_n}
+                    result = {"id": gid, "status": revived["status"], "revival": revival_n}
 
                 elif kind == "spawn_hypo":
                     h = self.hypotheses.spawn(intention.text, source="will")

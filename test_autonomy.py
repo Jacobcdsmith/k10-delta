@@ -121,13 +121,15 @@ class TestWill(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             will, soul, episodes, hypos, goals, calls = make_will(Path(d))
             g = goals.add("Finish ESP32 MQTT", source="user")
+            goals.record_failure(g["id"])
+            goals.record_failure(g["id"])
             goals.mark_stalled(g["id"], "test stall")
             report = will.tick(20, CALM)
             self.assertEqual(report["intention"]["kind"], "revive")
-            # A revived goal must land in a canonical live status (spawned),
-            # visible to top_open()/Will._live_goals(). The raw legacy "open"
-            # alias matches no canonical query and would orphan the goal.
-            self.assertEqual(goals.get(g["id"])["status"], "spawned")
+            revived = goals.get(g["id"])
+            self.assertEqual(revived["status"], "revival")
+            self.assertEqual(revived["failures"], 0)
+            self.assertEqual(revived["consecutive_failures"], 0)
             self.assertIsNotNone(goals.top_open())
             # Exhaust budget
             goals.mark_stalled(g["id"], "again")

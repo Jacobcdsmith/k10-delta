@@ -208,11 +208,11 @@ def _build_status_payload() -> dict:
     tool_acts = counters.get("tool_acts", 0) or 0
     outward = counters.get("outward_acts", 0) or 0
     open_goals = 0
-    in_progress_goals = 0
+    active_goals = 0
     stalled_goals = 0
     if _ctx.goals:
         open_goals = len(_ctx.goals.list_all("open"))
-        in_progress_goals = len(_ctx.goals.list_all("in_progress"))
+        active_goals = len(_ctx.goals.list_all("active"))
         stalled_goals = len(_ctx.goals.list_all("stalled"))
     return {
         "identity": _ctx.soul.get("identity", "K10-Δ"),
@@ -236,9 +236,9 @@ def _build_status_payload() -> dict:
         "top_concepts": sem.get("concepts", [])[:10],
         "identity_thread": _ctx.soul.get("identity_thread", {}),
         "open_goals": open_goals,
-        "in_progress_goals": in_progress_goals,
+        "in_progress_goals": active_goals,
         "stalled_goals": stalled_goals,
-        "active_goals": open_goals + in_progress_goals,
+        "active_goals": open_goals + active_goals,
         "will_enabled": bool(auto.get("enabled", True)),
         "last_intention": last_intention,
         "last_tick_cycle": auto.get("last_tick_cycle"),
@@ -371,7 +371,7 @@ def _build_lite_status_payload() -> dict:
         "boot_count": _ctx.soul.get("boot_count", 0),
         "episode_count": len(_ctx.read_episodes(9999)) if _ctx.read_episodes else 0,
         "active_goals": (
-            len(_ctx.goals.list_all("open")) + len(_ctx.goals.list_all("in_progress"))
+            len(_ctx.goals.list_all("open")) + len(_ctx.goals.list_all("active"))
             if _ctx.goals else 0
         ),
         "trajectory": {"label": (sem.get("trajectory") or {}).get("label")},
