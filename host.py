@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import types
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,13 +35,11 @@ from selfmod import SelfModEngine
 from chrono import ChronoEngine
 from kairos import KairosEngine
 from hermes_bridge import HermesBridge
-from llm import LLMBridge
 from store import (
     SOUL_PATH, EPISODES_PATH, NOTES_PATH, HYPO_PATH, DREAM_LOG, WORKSPACE,
     state_lock, load_soul, save_soul, append_episode, read_episodes,
     load_notes, save_notes,
 )
-from observability import ActionLog, StateSnapshotter
 from tools.registry import ToolRegistry, build_namespace_proxies
 from tools import memory as memory_tools
 from tools import fs as fs_tools
@@ -61,7 +60,6 @@ from tools import data_ns
 from tools import k10_ns
 from tools import kairos_ns
 from tools import ide_ns
-from tools import llm_ns
 from goals import GoalStore, GOALS_PATH
 import supabase_sync
 from dashboard import configure as configure_dashboard, start_dashboard
@@ -127,9 +125,6 @@ class HostState:
     chrono: ChronoEngine
     kairos: KairosEngine
     hermes_bridge: HermesBridge
-    llm_bridge: LLMBridge
-    action_log: ActionLog
-    snapshotter: StateSnapshotter
     ctx: types.SimpleNamespace
     dashboard_url: str
 
@@ -161,8 +156,6 @@ def _log_tool_call(name: str, args: dict, ok: bool, duration_ms: float,
         "source": "tool",
         "detail": detail,
     })
-    if _state is not None:
-        _state.action_log.record(name, args, ok, duration_ms, result=result, error=error)
 
 
 _dedup_cache: dict[str, tuple[float, str]] = {}
@@ -241,12 +234,6 @@ def boot() -> HostState:
     log.info("Boot #%d", soul["boot_count"])
 
     registry = ToolRegistry()
-    action_log = ActionLog(K10_DIR / "logs" / "tool_calls.jsonl")
-    snapshotter = StateSnapshotter(
-        K10_DIR / "state_snapshots",
-        [SOUL_PATH, GOALS_PATH, HYPO_PATH],
-        keep=20,
-    )
     hypotheses = HypothesisStore(HYPO_PATH)
     goals = GoalStore(GOALS_PATH)
     removed = hypotheses.dedupe_open()
@@ -303,7 +290,6 @@ def boot() -> HostState:
     }
     chrono = ChronoEngine(SCHEDULE_PATH, soul, state_lock, globals_dict=chrono_globals)
     hermes_bridge = HermesBridge()
-    llm_bridge = LLMBridge()
 
     selfmod = SelfModEngine(
         get_tools_fn=lambda: registry.all_tools,
@@ -333,7 +319,6 @@ def boot() -> HostState:
         chrono=chrono,
         kairos=kairos,
         hermes_bridge=hermes_bridge,
-        llm_bridge=llm_bridge,
         registry=registry,
         WORKSPACE=WORKSPACE,
         EPISODES_PATH=EPISODES_PATH,
@@ -361,7 +346,6 @@ def boot() -> HostState:
     utils_ns.register(registry, ctx)
     text_ns.register(registry, ctx)
     data_ns.register(registry, ctx)
-    llm_ns.register(registry, ctx)
 
     engine._update_identity_thread(
         _substantive_episodes(read_episodes(100)),
@@ -399,9 +383,6 @@ def boot() -> HostState:
         chrono=chrono,
         kairos=kairos,
         hermes_bridge=hermes_bridge,
-        llm_bridge=llm_bridge,
-        action_log=action_log,
-        snapshotter=snapshotter,
         ctx=ctx,
         dashboard_url="",
     )
@@ -418,7 +399,6 @@ def boot() -> HostState:
         handle_tool=handle_tool,
         read_episodes=read_episodes,
         hermes_bridge=hermes_bridge,
-        action_log=action_log,
         ws_health=get_ws_health,
         _start_time=_start_time,
     )
@@ -431,9 +411,6 @@ def boot() -> HostState:
     engine.start()
     chrono.reset_last_run()
     chrono.start()
-
-    snapshotter.snapshot()
-    snapshotter.start(interval_s=int(os.environ.get("K10_SNAPSHOT_INTERVAL_S", "900")))
 
     # Optional Supabase cloud sync
     if supabase_sync.init():
@@ -453,18 +430,15 @@ def _do_shutdown(state: HostState):
     state.chrono.stop()
     state.engine.stop()
     save_soul(state.soul)
-    state.snapshotter.snapshot()
-    state.snapshotter.stop()
     log.info("Shutdown complete.")
 
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
 _ws_send_lock = threading.Lock()
-# Holds whatever ws connection is currently live. Tool calls run on background
-# threads and can outlive the connection they arrived on (a reconnect can
-# happen mid-call) — replies must always go out on the CURRENT connection,
-# not a captured one, or the result is silently dropped on a dead socket.
-_live_ws: dict = {"conn": None}
+_tool_call_pool = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("K10_TOOL_CALL_WORKERS", "8"))
+)
+_live_ws: dict = {"conn": None, "generation": 0}
 
 # Connection-health tracking, surfaced to the dashboard via get_ws_health().
 _ws_health = {
@@ -485,11 +459,15 @@ def get_ws_health() -> dict:
     return h
 
 
-def _reply(msg_id, result=None, error=None):
+def _reply(msg_id, result=None, error=None, generation=None):
     frame = {"jsonrpc": "2.0", "id": msg_id}
     frame["error" if error else "result"] = (
         {"code": -32000, "message": str(error)} if error else result)
     conn = _live_ws["conn"]
+    current_generation = _live_ws["generation"]
+    if generation is not None and generation != current_generation:
+        log.warning("Dropped stale reply for id=%s from connection #%s", msg_id, generation)
+        return
     if conn is None:
         log.warning("Dropped reply for id=%s — no live connection", msg_id)
         return
@@ -500,14 +478,14 @@ def _reply(msg_id, result=None, error=None):
         log.warning("Failed to send reply for id=%s: %s", msg_id, e)
 
 
-def _run_tool_call(msg_id, tname, args):
+def _run_tool_call(msg_id, tname, args, generation):
     try:
         text = handle_tool(tname, args)
-        _reply(msg_id, {"content": [{"type": "text", "text": text}]})
+        _reply(msg_id, {"content": [{"type": "text", "text": text}]}, generation=generation)
         log.info("→ ok  %s", tname)
     except Exception as e:
         log.warning("→ err %s: %s", tname, e)
-        _reply(msg_id, error=str(e))
+        _reply(msg_id, error=str(e), generation=generation)
 
 
 def _handle(raw: str, state: HostState):
@@ -562,10 +540,8 @@ def _handle(raw: str, state: HostState):
         args = params.get("arguments") or {}
         log.info("← %s", tname)
         state.dream.ping()
-        threading.Thread(
-            target=_run_tool_call, args=(msg_id, tname, args),
-            daemon=True,
-        ).start()
+        generation = _live_ws["generation"]
+        _tool_call_pool.submit(_run_tool_call, msg_id, tname, args, generation)
     elif method == "ping":
         _reply(msg_id, {})
     elif method.startswith("notifications/"):
@@ -578,7 +554,9 @@ def _run_ws(state: HostState):
     ws = websocket.WebSocket()
     ws.connect(MCP_ENDPOINT, timeout=WS_CONNECT_TIMEOUT)
     ws.settimeout(PING_INTERVAL)
+    _live_ws["generation"] += 1
     _live_ws["conn"] = ws
+    generation = _live_ws["generation"]
     now = time.time()
     with _ws_health_lock:
         _ws_health["connected"] = True
@@ -598,7 +576,7 @@ def _run_ws(state: HostState):
                 with _ws_send_lock:
                     ws.ping()
     finally:
-        if _live_ws["conn"] is ws:
+        if _live_ws["conn"] is ws and _live_ws["generation"] == generation:
             _live_ws["conn"] = None
         with _ws_health_lock:
             _ws_health["connected"] = False

@@ -14,11 +14,13 @@ from cognition import (
     AutonomyPolicy,
     CognitionEngine,
     HypothesisStore,
+    Intention,
     MemeticEngine,
     WILL_DEFAULTS,
     _is_meta_episode,
 )
 from goals import GoalStore
+from goals_pursuit import GoalPursuitService
 
 
 class FakeDream:
@@ -210,6 +212,79 @@ class TestWill(unittest.TestCase):
     def test_will_defaults_exported(self):
         self.assertIn("enabled", WILL_DEFAULTS)
         self.assertNotIn("min_active_goals", WILL_DEFAULTS)
+
+    def test_retryable_tool_failure_stays_failed(self):
+        with tempfile.TemporaryDirectory() as d:
+            calls = []
+
+            def call_tool(name, args=None):
+                calls.append((name, args or {}))
+                return '{"ok": false, "error": "temporary failure"}'
+
+            soul = {"identity": "test", "boot_count": 1, "axioms": [], "semantic": {}}
+            hypos = HypothesisStore(Path(d) / "hypotheses.json")
+            goals = GoalStore(Path(d) / "goals.json")
+            will = AutonomyPolicy(
+                call_tool=call_tool,
+                goals=goals,
+                hypotheses=hypos,
+                dream=None,
+                soul=soul,
+                save_soul=lambda s: None,
+                read_episodes=lambda n=100: [],
+                usage_stats_fn=None,
+                state_lock=threading.Lock(),
+                append_episode=lambda ep: None,
+                workspace=Path(d) / "workspace",
+            )
+            intention = Intention(
+                kind="act",
+                text="retry net search",
+                tool="net.search",
+                args={"query": "retry"},
+            )
+            report = will._execute(
+                intention,
+                cycle=1,
+                auto={"retry_max_attempts": 2, "retry_base_delay_s": 0, "retry_on_tools": ["net.search"]},
+            )
+            self.assertFalse(report["ok"])
+            self.assertEqual(report["error"], "temporary failure")
+            self.assertEqual(len(calls), 2)
+
+
+class TestGoalPursuitFixes(unittest.TestCase):
+
+    def test_completion_criteria_prevents_fallback_completion(self):
+        with tempfile.TemporaryDirectory() as d:
+            goals = GoalStore(Path(d) / "goals.json")
+            goal = goals.add(
+                "Collect five facts",
+                completion_criteria={"type": "evidence_count", "min_evidence": 5},
+            )
+            goals.add_evidence(goal["id"], "search: found one fact", source="net")
+            service = GoalPursuitService(goals, lambda name, args: "{}")
+            completed, reason = service.auto_evaluate_completion(goals.get(goal["id"]))
+            self.assertFalse(completed)
+            self.assertEqual(reason, "completion_criteria not yet met")
+
+    def test_kind_resolution_checks_code_before_status(self):
+        with tempfile.TemporaryDirectory() as d:
+            goals = GoalStore(Path(d) / "goals.json")
+            service = GoalPursuitService(goals, lambda name, args: "{}")
+            self.assertEqual(
+                service._resolve_kind({"text": "implement a sensor driver"}),
+                "delivery",
+            )
+
+    def test_status_check_plan_does_not_reference_kairos_tools(self):
+        with tempfile.TemporaryDirectory() as d:
+            goals = GoalStore(Path(d) / "goals.json")
+            goal = goals.add("check device status", kind="status_check")
+            service = GoalPursuitService(goals, lambda name, args: "{}")
+            steps = service._generate_plan_steps(goal, 5)
+            self.assertTrue(all(step["tool"] != "kairos.phase" for step in steps))
+            self.assertTrue(all(step["tool"] != "kairos.stats" for step in steps))
 
 
 if __name__ == "__main__":

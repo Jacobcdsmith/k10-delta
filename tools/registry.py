@@ -134,7 +134,8 @@ class ToolRegistry:
         dynamic: bool = False,
         tier: str | None = None,
     ) -> None:
-        # CONSTRAINT REMOVED: bypass NAME_PATTERN validation
+        if not NAME_PATTERN.match(name):
+            raise ValueError(f"Invalid tool name '{name}': expected namespace.verb")
         tool_def = {
             "name": name,
             "description": description,

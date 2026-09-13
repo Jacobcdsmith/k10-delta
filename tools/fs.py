@@ -30,6 +30,10 @@ def normalize_rel_path(rel: str) -> str:
     return p or "."
 
 
+def _allowed_roots(workspace: Path) -> list[Path]:
+    return [workspace.resolve(), K10_ROOT.resolve()]
+
+
 def resolve_path(rel: str, workspace: Path) -> Path:
     rel = normalize_rel_path(rel)
     raw = Path(rel)
@@ -38,6 +42,11 @@ def resolve_path(rel: str, workspace: Path) -> Path:
     else:
         candidates = [(workspace / raw).resolve(), (K10_ROOT / raw).resolve()]
         p = next((c for c in candidates if c.exists()), candidates[0])
+
+    roots = _allowed_roots(workspace)
+    if not any(str(p).startswith(str(root)) for root in roots):
+        raise PermissionError(
+            f"fs.* access denied outside workspace/k10_delta: {rel}")
     return p
 
 

@@ -56,7 +56,6 @@ _KIND_TEMPLATES: dict[str, list[dict[str, str]]] = {
     "status_check": [
         {"action": "device_status", "tool": "host.get_device_status"},
         {"action": "sensor_poll", "tool": "sensor.poll"},
-        {"action": "kairos_phase", "tool": "kairos.phase"},
     ],
 }
 
@@ -99,10 +98,8 @@ _VARIED_TEMPLATES: dict[str, list[list[dict[str, str]]]] = {
     ],
     "status_check": [
         [{"action": "device_status", "tool": "host.get_device_status"},
-         {"action": "sensor_poll", "tool": "sensor.poll"},
-         {"action": "kairos_phase", "tool": "kairos.phase"}],
+         {"action": "sensor_poll", "tool": "sensor.poll"}],
         [{"action": "sensor_poll", "tool": "sensor.poll"},
-         {"action": "kairos_stats", "tool": "kairos.stats"},
          {"action": "device_status", "tool": "host.get_device_status"}],
     ],
 }
@@ -276,12 +273,9 @@ class GoalPursuitService:
                 },
             ),
             # Zero-arg, read-only status/introspection tools for the
-            # "status_check" kind -- confirmed to take {} in their own
-            # tool() registrations (device_ns.py, kairos_ns.py).
+            # "status_check" kind.
             "device_status": ("host.get_device_status", {}),
             "sensor_poll": ("sensor.poll", {}),
-            "kairos_phase": ("kairos.phase", {}),
-            "kairos_stats": ("kairos.stats", {}),
         }
         if action not in builders:
             raise ValueError(f"Unknown pursuit action: {action}")
@@ -343,8 +337,10 @@ class GoalPursuitService:
         N distinct steps each produced progress evidence.
         """
         gid = goal["id"]
-        if goal.get("completion_criteria") and self.goals.evaluate_completion(gid):
-            return True, "completion_criteria met"
+        if goal.get("completion_criteria"):
+            if self.goals.evaluate_completion(gid):
+                return True, "completion_criteria met"
+            return False, "completion_criteria not yet met"
 
         if goal.get("kind") == "delivery":
             step_results = goal.get("step_results") or {}
@@ -457,12 +453,12 @@ class GoalPursuitService:
             return kind
         # open / missing: keyword hints as fallback only
         text = str(goal.get("text", "")).lower()
-        if any(h in text for h in _STATUS_GOAL_HINTS):
-            return "status_check"
         if any(h in text for h in _CODE_GOAL_HINTS):
             return "delivery"
         if any(h in text for h in _RESEARCH_GOAL_HINTS):
             return "research"
+        if any(h in text for h in _STATUS_GOAL_HINTS):
+            return "status_check"
         return kind if kind in _KIND_TEMPLATES else "open"
 
     def _generate_plan_steps(self, goal: dict, max_steps: int) -> list[dict]:

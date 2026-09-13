@@ -30,7 +30,7 @@ DEFAULT_PORT = 8765
 
 def _get_dashboard_host() -> str:
     """Read dashboard host from env at call time (not import time)."""
-    return os.environ.get("K10_DASHBOARD_HOST", "127.0.0.1")
+    return os.environ.get("K10_DASHBOARD_HOST", "0.0.0.0")
 
 METRICS_HISTORY_PATH = Path(__file__).parent / "metrics_history.jsonl"
 _metrics_hist_lock = threading.Lock()
@@ -363,6 +363,28 @@ def _will_status_payload() -> dict:
     }
 
 
+def _build_lite_status_payload() -> dict:
+    sem = _ctx.soul.get("semantic", {})
+    tool_usage = sem.get("tool_usage", {})
+    will_payload = _will_status_payload()
+    return {
+        "boot_count": _ctx.soul.get("boot_count", 0),
+        "episode_count": len(_ctx.read_episodes(9999)) if _ctx.read_episodes else 0,
+        "active_goals": (
+            len(_ctx.goals.list_all("open")) + len(_ctx.goals.list_all("in_progress"))
+            if _ctx.goals else 0
+        ),
+        "trajectory": {"label": (sem.get("trajectory") or {}).get("label")},
+        "last_intention": {
+            "text": (will_payload.get("last_intention") or {}).get("text"),
+            "kind": (will_payload.get("last_intention") or {}).get("kind"),
+        },
+        "tool_usage": {
+            "error_tool_count": len((tool_usage.get("error_tools") or [])),
+        },
+    }
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         log.debug("dashboard: " + fmt, *args)
@@ -392,20 +414,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return _json_response(self, _build_status_payload())
 
         if path == "/api/status/lite":
-            full = _build_status_payload()
-            error_tools = (full.get("tool_usage") or {}).get("error_tools") or []
-            last_intention = full.get("last_intention") or {}
-            return _json_response(self, {
-                "boot_count": full.get("boot_count", 0),
-                "episode_count": full.get("episode_count", 0),
-                "active_goals": full.get("active_goals", 0),
-                "trajectory": {"label": (full.get("trajectory") or {}).get("label")},
-                "last_intention": {
-                    "text": last_intention.get("text"),
-                    "kind": last_intention.get("kind"),
-                },
-                "tool_usage": {"error_tool_count": len(error_tools)},
-            })
+            return _json_response(self, _build_lite_status_payload())
 
         if path == "/api/soul":
             return _json_response(self, _ctx.soul)

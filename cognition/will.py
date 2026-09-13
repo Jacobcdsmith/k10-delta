@@ -450,6 +450,8 @@ class AutonomyPolicy:
 
         while attempts < max(1, retry_max):
             attempts += 1
+            ok = True
+            error = None
             try:
                 if kind == "pursue" or (kind == "act" and intention.tool):
                     tool = intention.tool
@@ -471,6 +473,8 @@ class AutonomyPolicy:
                                          tool, attempts, retry_max, last_error)
                                 time.sleep(retry_delay * (2 ** (attempts - 1)))
                                 continue
+                            ok = False
+                            error = last_error
                     except (json.JSONDecodeError, TypeError):
                         pass
 
@@ -736,4 +740,3 @@ class AutonomyPolicy:
         self.last_intention = intention
         self.last_report = report
         return report
-
