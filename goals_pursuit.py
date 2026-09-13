@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
-from goals import GoalStore
+from goals import GoalStore, TERMINAL_STATUSES
+
+log = logging.getLogger("k10d.goals")
 
 CallTool = Callable[[str, dict], Any]
 
@@ -19,6 +22,10 @@ _CODE_GOAL_HINTS = (
 _RESEARCH_GOAL_HINTS = (
     "research", "study", "learn", "investigate", "explore",
     "analyze", "analyse", "find out", "survey", "review",
+)
+_STATUS_GOAL_HINTS = (
+    "sensor", "device status", "temperature", "humidity", "uptime",
+    "how are you doing", "check in", "self-check",
 )
 
 # Plan templates by kind. open/general prefer outward paths (no forced deliver).
@@ -43,10 +50,68 @@ _KIND_TEMPLATES: dict[str, list[dict[str, str]]] = {
         {"action": "hermes", "tool": "hermes.query"},
         {"action": "synthesise", "tool": "emerge.synthesise"},
     ],
+    # Zero-arg, read-only status/introspection tools only -- kept separate
+    # from "open"/"general" so a status-check goal doesn't burn a
+    # net.search/hermes.query round trip on something local and instant.
+    "status_check": [
+        {"action": "device_status", "tool": "host.get_device_status"},
+        {"action": "sensor_poll", "tool": "sensor.poll"},
+    ],
+}
+
+# Alternate plans per kind, indexed by revival attempt. A revived goal
+# re-plans with a DIFFERENT strategy (attempt = revival_count) instead of
+# retrying the identical plan that already failed. attempt 0 mirrors
+# _KIND_TEMPLATES; later attempts reorder so a different tool leads.
+_VARIED_TEMPLATES: dict[str, list[list[dict[str, str]]]] = {
+    "delivery": [
+        [{"action": "synthesise", "tool": "emerge.synthesise"},
+         {"action": "hermes", "tool": "hermes.query"},
+         {"action": "deliver", "tool": "act.deliver"}],
+        [{"action": "search", "tool": "net.search"},
+         {"action": "hermes", "tool": "hermes.query"},
+         {"action": "deliver", "tool": "act.deliver"}],
+    ],
+    "research": [
+        [{"action": "search", "tool": "net.search"},
+         {"action": "fetch", "tool": "net.search"},
+         {"action": "synthesise", "tool": "emerge.synthesise"}],
+        [{"action": "hermes", "tool": "hermes.query"},
+         {"action": "search", "tool": "net.search"},
+         {"action": "synthesise", "tool": "emerge.synthesise"}],
+    ],
+    "general": [
+        [{"action": "search", "tool": "net.search"},
+         {"action": "hermes", "tool": "hermes.query"},
+         {"action": "synthesise", "tool": "emerge.synthesise"}],
+        [{"action": "hermes", "tool": "hermes.query"},
+         {"action": "search", "tool": "net.search"},
+         {"action": "synthesise", "tool": "emerge.synthesise"}],
+    ],
+    "open": [
+        [{"action": "search", "tool": "net.search"},
+         {"action": "hermes", "tool": "hermes.query"},
+         {"action": "synthesise", "tool": "emerge.synthesise"}],
+        [{"action": "hermes", "tool": "hermes.query"},
+         {"action": "search", "tool": "net.search"},
+         {"action": "synthesise", "tool": "emerge.synthesise"}],
+    ],
+    "status_check": [
+        [{"action": "device_status", "tool": "host.get_device_status"},
+         {"action": "sensor_poll", "tool": "sensor.poll"}],
+        [{"action": "sensor_poll", "tool": "sensor.poll"},
+         {"action": "device_status", "tool": "host.get_device_status"}],
+    ],
 }
 
 MAX_FAILURES = 3
 MIN_DELIVERABLE_BYTES = 80  # catches empty/failed writes, not a "realness" bar
+MODERATE_COMPLETION_MIN_STEPS = 2  # distinct advancing steps -> auto-complete
+# NOTE: 2, not 3 -- the "research" kind's "fetch" step dispatches through
+# _swarm_search and is recorded under the "search" label (see _dispatch),
+# so a standard 3-step research plan produces only 2 distinct progress
+# labels even when every step succeeds. general/open (search/hermes/
+# synthesise) produce 3 distinct labels, comfortably clearing this bar.
 
 
 def _verify_deliver_result(result: Any) -> bool:
@@ -67,16 +132,19 @@ def _verify_deliver_result(result: Any) -> bool:
 
 
 def _is_hermes_in_flight(action: str, result: Any) -> bool:
-    """True if a hermes step returned early because the query is still
-    running (see hermes_bridge.HermesBridge.query's poll_timeout) -- this
-    is neither success nor failure, just "still working"."""
-    if action != "hermes":
+    if action not in ("hermes", "poll_hermes"):
         return False
     try:
         parsed = json.loads(result) if isinstance(result, str) else result
     except Exception:
         return False
-    return isinstance(parsed, dict) and parsed.get("in_flight") is True
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("in_flight") is True:
+        return True
+    if parsed.get("status") == "running":
+        return True
+    return False
 
 
 def _result_ok(result: Any, action: str | None = None) -> bool:
@@ -87,7 +155,14 @@ def _result_ok(result: Any, action: str | None = None) -> bool:
     try:
         parsed = json.loads(result)
         if isinstance(parsed, dict):
-            return bool(parsed.get("ok", True))
+            # Bridge tools (hermes.*) report outcome under "success", not
+            # "ok" — without this a failed hermes step reads as success,
+            # suppressing the circuit breaker and mis-scoring completion.
+            if "ok" in parsed:
+                return bool(parsed.get("ok"))
+            if "success" in parsed:
+                return bool(parsed.get("success"))
+            return True
     except Exception:
         pass
     return True
@@ -115,6 +190,28 @@ class GoalPursuitService:
             parts.append(f"\n## Evidence trail\n{trail or '(no prior evidence)'}")
         return "\n".join(parts)
 
+    def _get_latest_hermes_query_id(self, goal: dict) -> dict:
+        step_results = goal.get("step_results") or {}
+        hermes_result = step_results.get("hermes", {})
+        hermes_text = hermes_result.get("text", "")
+        try:
+            parsed = json.loads(hermes_text) if isinstance(hermes_text, str) else hermes_text
+            if isinstance(parsed, dict) and parsed.get("query_id"):
+                return {"query_id": parsed["query_id"]}
+        except Exception:
+            pass
+        for ev in reversed(goal.get("evidence", [])):
+            ev_text = str(ev.get("text", ""))
+            if "hermes" in ev_text and "query_id" in ev_text:
+                try:
+                    import re
+                    match = re.search(r"query_id[=:]\s*([a-zA-Z0-9_]+)", ev_text)
+                    if match:
+                        return {"query_id": match.group(1)}
+                except Exception:
+                    pass
+        return {"query_id": ""}
+
     def _build_step(self, action: str, goal: dict) -> tuple[str, dict]:
         """Map a pursuit action to (tool_name, args)."""
         text = goal["text"]
@@ -134,6 +231,13 @@ class GoalPursuitService:
                 "emerge.synthesise",
                 {"topic": text},
             ),
+            # SYNCHRONOUS hermes.query, not query_async. query_async returns
+            # {"in_flight": true} immediately, which _is_hermes_in_flight
+            # treats as "don't mark the step done" — but the plan templates
+            # have no poll step, so the multi-act loop re-fires query_async
+            # every act, spawning runaway `hermes -z` subprocesses on a goal
+            # that never advances. The blocking query returns a terminal
+            # result, so the step is marked executed and the plan progresses.
             "hermes": (
                 "hermes.query",
                 {
@@ -143,6 +247,10 @@ class GoalPursuitService:
                     ),
                     "timeout": 180,
                 },
+            ),
+            "poll_hermes": (
+                "hermes.poll",
+                self._get_latest_hermes_query_id(goal),
             ),
             "deliver": (
                 "act.deliver",
@@ -164,6 +272,10 @@ class GoalPursuitService:
                     }),
                 },
             ),
+            # Zero-arg, read-only status/introspection tools for the
+            # "status_check" kind.
+            "device_status": ("host.get_device_status", {}),
+            "sensor_poll": ("sensor.poll", {}),
         }
         if action not in builders:
             raise ValueError(f"Unknown pursuit action: {action}")
@@ -211,6 +323,69 @@ class GoalPursuitService:
             indent=2,
         )
 
+    # ── closing the loop: goals must reach a terminal state ────────────────
+
+    def auto_evaluate_completion(self, goal: dict) -> tuple[bool, str]:
+        """Can this goal be auto-completed right now? Used both when a plan
+        exhausts and by goal.review's no-decision auto-check, so the two
+        entry points agree on what "done" means.
+
+        Precedence: explicit completion_criteria always wins if present.
+        Delivery goals require a verified artifact (act.deliver actually
+        wrote a real file) -- never moderate-complete a delivery goal on
+        evidence breadth alone. Everything else uses the moderate rule:
+        N distinct steps each produced progress evidence.
+        """
+        gid = goal["id"]
+        if goal.get("completion_criteria") and self.goals.evaluate_completion(gid):
+            return True, "completion_criteria met"
+
+        if goal.get("kind") == "delivery":
+            step_results = goal.get("step_results") or {}
+            deliver_text = step_results.get("deliver", {}).get("text")
+            if deliver_text and _verify_deliver_result(deliver_text):
+                return True, "deliverable verified (act.deliver wrote a real file)"
+            return False, "delivery goal has no verified deliverable yet"
+
+        evidence = goal.get("evidence") or []
+        progress_steps = {
+            str(e.get("text", "")).split(":", 1)[0].strip()
+            for e in evidence
+            if e.get("signal") == "progress"
+        }
+        progress_steps.discard("")
+        if len(progress_steps) >= MODERATE_COMPLETION_MIN_STEPS:
+            return True, (
+                f"{len(progress_steps)} distinct steps advanced the goal: "
+                f"{sorted(progress_steps)}"
+            )
+        return False, (
+            f"only {len(progress_steps)} distinct advancing step(s) so far: "
+            f"{sorted(progress_steps)}"
+        )
+
+    def _close_exhausted_plan(self, goal: dict) -> tuple[str, Any]:
+        """Plan fully executed: evaluate for completion instead of falling
+        into an unbounded kind-based shuffle that never lets the goal reach
+        a terminal state. Auto-completes when evidence supports it;
+        otherwise parks in REVIEW for a human decision via goal.review."""
+        gid = goal["id"]
+        self.goals.mark_review(gid)
+        goal = self.goals.get(gid)
+        completed, reason = self.auto_evaluate_completion(goal)
+        if completed:
+            self.goals.mark_completed(gid, f"auto-completed: {reason}")
+            return "auto_complete", json.dumps(
+                {"ok": True, "auto_completed": True, "reason": reason}
+            )
+        return "plan_exhausted", json.dumps({
+            "ok": True,
+            "auto_completed": False,
+            "reason": reason,
+            "status": "review",
+            "msg": "Plan exhausted; parked in review awaiting goal.review or stronger evidence.",
+        })
+
     def _dispatch(self, action: str, goal: dict) -> tuple[str, Any]:
         """Run a named pursuit step; fetch now fans out a parallel multi-
         angle search instead of duplicating 'search'."""
@@ -225,7 +400,8 @@ class GoalPursuitService:
         tool_name = step.get("tool") or ""
         # Prefer action dispatcher; fall back to raw tool if unknown action
         known = {
-            "search", "fetch", "synthesise", "hermes", "deliver", "plan", "pursue",
+            "search", "fetch", "synthesise", "hermes", "poll_hermes", "deliver", "plan", "pursue",
+            "device_status", "sensor_poll", "kairos_phase", "kairos_stats",
         }
         if action == "pursue":
             result = self.call_tool(
@@ -279,11 +455,19 @@ class GoalPursuitService:
             return "delivery"
         if any(h in text for h in _RESEARCH_GOAL_HINTS):
             return "research"
+        if any(h in text for h in _STATUS_GOAL_HINTS):
+            return "status_check"
         return kind if kind in _KIND_TEMPLATES else "open"
 
     def _generate_plan_steps(self, goal: dict, max_steps: int) -> list[dict]:
         kind = self._resolve_kind(goal)
-        templates = _KIND_TEMPLATES.get(kind, _KIND_TEMPLATES["open"])
+        # Pick the plan variant for this revival attempt so a revived goal
+        # tries a different strategy than the one that already failed.
+        variants = _VARIED_TEMPLATES.get(kind) or [
+            _KIND_TEMPLATES.get(kind, _KIND_TEMPLATES["open"])
+        ]
+        attempt = int(goal.get("revival_count", 0) or 0)
+        templates = variants[attempt % len(variants)]
         return [
             {
                 "index": i,
@@ -330,8 +514,17 @@ class GoalPursuitService:
                 action, result = self._run_plan_step(goal, nxt)
                 self._mark_plan_step_done(gid, plan, nxt)
                 return action, result
+            # Plan is non-empty and every step executed: the goal has
+            # finished its template march. Close the loop (evaluate for
+            # completion) instead of falling into the kind-based fallback
+            # below, which would otherwise re-dispatch search/hermes/
+            # synthesise forever and never let the goal reach a terminal
+            # state.
+            return self._close_exhausted_plan(goal)
 
-        # Fallbacks when plan is exhausted or empty
+        # Plan generation produced nothing (pathological -- templates are
+        # static and always non-empty in practice). Last-resort single
+        # dispatch by kind so the goal isn't stuck with zero evidence.
         if kind == "research":
             if "search" not in prior:
                 return self._dispatch("search", goal)
@@ -408,6 +601,30 @@ class GoalPursuitService:
             indent=2,
         )
 
+    def _record_step_exception(self, gid: str, action: str, exc: Exception) -> str:
+        """A pursuit step *raised* (vs. returning a graceful ok:false payload).
+
+        Route it through the same circuit breaker as a graceful failure so the
+        exception can't propagate out of pursue() — which would skip
+        record_failure() entirely and leave the goal wedged at status="active",
+        re-picked and re-raising every tick until the age-based stale sweep.
+        """
+        self.goals.record_failure(
+            gid, reason=f"{action}: raised {type(exc).__name__}: {exc}")
+        # record_failure already auto-stalls at the threshold; only stall here
+        # if it didn't (avoids a duplicate stall + duplicate dead_end evidence).
+        if (self.goals.failure_count(gid) >= MAX_FAILURES
+                and self.goals.get(gid).get("status") != "stalled"):
+            self.goals.mark_stalled(
+                gid, "Goal stalled after 3+ consecutive pursue failures")
+        log.warning("Goal %s step %r raised: %s", gid, action, exc)
+        return json.dumps({
+            "ok": False,
+            "goal": self.goals.get(gid),
+            "step": action,
+            "error": str(exc)[:800],
+        }, indent=2)
+
     def pursue(self, args: dict) -> str:
         """Take one concrete step on the highest-priority open goal (or args id)."""
         goal = self._resolve_goal(args) if args.get("id") else self.goals.top_open()
@@ -422,6 +639,23 @@ class GoalPursuitService:
                 "msg": f"Goal {gid} is stalled — re-plan or cancel before pursuing",
             })
 
+        if goal.get("status") == "review":
+            return json.dumps({
+                "ok": False,
+                "msg": (
+                    f"Goal {gid} is awaiting review — use goal.review "
+                    "(decision=complete|cancel|continue|supersede) to resolve it."
+                ),
+                "goal": goal,
+            })
+
+        if goal.get("status") in TERMINAL_STATUSES:
+            return json.dumps({
+                "ok": False,
+                "msg": f"Goal {gid} is {goal['status']} (terminal) — cannot pursue.",
+                "goal": goal,
+            })
+
         # Circuit breaker via GoalStore failures field
         if self.goals.failure_count(gid) >= MAX_FAILURES:
             self.goals.mark_stalled(
@@ -431,7 +665,12 @@ class GoalPursuitService:
                 "msg": f"Goal {gid} stalled after 3+ consecutive failures",
             })
 
-        self.goals.update(gid, status="in_progress")
+        # Canonical ACTIVE transition. Do NOT write the legacy "in_progress"
+        # alias here: GoalStore.update() stores it raw, and top_open() /
+        # Will._live_goals() query the canonical "active" — a raw "in_progress"
+        # matches neither, orphaning the goal (invisible to pursuit AND to the
+        # failure→stall breaker, which is gated on status == "active").
+        self.goals.mark_active(gid)
         goal = self.goals.get(gid)
 
         step = str(args.get("step", "auto") or "auto").strip().lower()
@@ -450,11 +689,17 @@ class GoalPursuitService:
                 })
             if not isinstance(tool_args, dict):
                 return json.dumps({"ok": False, "msg": "args must be a dict"})
-            result = self.call_tool(str(tool_name), tool_args)
             action = f"tool:{tool_name}"
-            self.goals.add_evidence(gid, f"{action}: {str(result)[:200]}")
+            try:
+                result = self.call_tool(str(tool_name), tool_args)
+            except Exception as e:
+                return self._record_step_exception(gid, action, e)
+            step_ok = _result_ok(result, action)
+            self.goals.add_evidence(
+                gid, f"{action}: {str(result)[:200]}",
+                signal="progress" if step_ok else "dead_end")
             self.goals.set_step_result(gid, action, result)
-            if _result_ok(result, action):
+            if step_ok:
                 self.goals.clear_failures(gid)
             else:
                 self.goals.record_failure(gid)
@@ -464,7 +709,7 @@ class GoalPursuitService:
             self._log_episode(goal, action, result)
             return json.dumps(
                 {
-                    "ok": True,
+                    "ok": step_ok,
                     "goal": self.goals.get(gid),
                     "step": action,
                     "result": str(result)[:800],
@@ -480,20 +725,30 @@ class GoalPursuitService:
         if step == "auto" and plan:
             next_step = next((s for s in plan if not s.get("executed")), None)
             if next_step:
-                action, result = self._run_plan_step(goal, next_step)
+                try:
+                    action, result = self._run_plan_step(goal, next_step)
+                except Exception as e:
+                    return self._record_step_exception(
+                        gid, next_step.get("action") or "auto", e)
                 in_flight = _is_hermes_in_flight(action, result)
                 if not in_flight:
                     self._mark_plan_step_done(gid, plan, next_step)
                 plan_step_meta = next_step
+                step_ok = in_flight or _result_ok(result, action)
                 evidence_text = (
                     f"{action}: in_flight, poll via hermes.poll" if in_flight
                     else f"{action}: {str(result)[:200]}"
                 )
-                self.goals.add_evidence(gid, evidence_text)
+                # Tag failed steps 'dead_end' so auto_evaluate_completion (which
+                # counts distinct 'progress'-signal step labels) can't complete
+                # a goal on steps that produced nothing.
+                self.goals.add_evidence(
+                    gid, evidence_text,
+                    signal="progress" if step_ok else "dead_end")
                 self.goals.set_step_result(gid, action, result)
                 if in_flight:
                     pass  # neither success nor failure -- don't touch the circuit breaker
-                elif _result_ok(result, action):
+                elif step_ok:
                     self.goals.clear_failures(gid)
                 else:
                     self.goals.record_failure(gid)
@@ -502,9 +757,11 @@ class GoalPursuitService:
                             gid, "Goal stalled after 3+ consecutive pursue failures")
                 self._log_episode(
                     goal, action, result, plan_index=next_step.get("index"))
+                # Outer ok reflects the step outcome so the Will's multi-act
+                # break-on-failure guard actually fires for a soft-failed step.
                 return json.dumps(
                     {
-                        "ok": True,
+                        "ok": step_ok,
                         "goal": self.goals.get(gid),
                         "step": action,
                         "plan_step": plan_step_meta,
@@ -513,26 +770,32 @@ class GoalPursuitService:
                     indent=2,
                 )
 
-        known_steps = {"search", "fetch", "synthesise", "hermes", "deliver"}
-        if step in known_steps:
-            action, result = self._dispatch(step, goal)
-        elif step == "auto":
-            action, result = self._pick_auto_step(goal, prior)
-        else:
-            # Unknown step → synthesise (legacy default)
-            action, result = self._dispatch("synthesise", goal)
+        known_steps = {"search", "fetch", "synthesise", "hermes", "poll_hermes", "deliver"}
+        try:
+            if step in known_steps:
+                action, result = self._dispatch(step, goal)
+            elif step == "auto":
+                action, result = self._pick_auto_step(goal, prior)
+            else:
+                # Unknown step → synthesise (legacy default)
+                action, result = self._dispatch("synthesise", goal)
+        except Exception as e:
+            return self._record_step_exception(gid, step, e)
 
         in_flight = _is_hermes_in_flight(action, result)
+        step_ok = in_flight or _result_ok(result, action)
         evidence_text = (
             f"{action}: in_flight, poll via hermes.poll" if in_flight
             else f"{action}: {str(result)[:200]}"
         )
-        self.goals.add_evidence(gid, evidence_text)
+        self.goals.add_evidence(
+            gid, evidence_text,
+            signal="progress" if step_ok else "dead_end")
         self.goals.set_step_result(gid, action, result)
 
         if in_flight:
             pass  # neither success nor failure -- don't touch the circuit breaker
-        elif _result_ok(result, action):
+        elif step_ok:
             self.goals.clear_failures(gid)
         else:
             self.goals.record_failure(gid)
@@ -543,7 +806,7 @@ class GoalPursuitService:
         self._log_episode(goal, action, result)
         return json.dumps(
             {
-                "ok": True,
+                "ok": step_ok,
                 "goal": self.goals.get(gid),
                 "step": action,
                 "result": str(result)[:800],

@@ -118,7 +118,10 @@ def register(registry, ctx) -> None:
             "priority": _p("integer", "Priority 1-10 (default 5)", required=False),
             "kind": _p(
                 "string",
-                "Goal kind: open|general|research|delivery (default open)",
+                "Goal kind: open|general|research|delivery|status_check (default open). "
+                "status_check is for quick device/sensor/uptime checks -- it dispatches "
+                "zero-arg read-only tools (host.get_device_status, sensor.poll, kairos.phase) "
+                "instead of a search/hermes/synthesise round trip.",
                 required=False,
             ),
         }),
@@ -140,7 +143,7 @@ def register(registry, ctx) -> None:
             "text": _p("string", "New text", required=False),
             "status": _p("string", "Status", required=False),
             "priority": _p("integer", "Priority", required=False),
-            "kind": _p("string", "open|general|research|delivery", required=False),
+            "kind": _p("string", "open|general|research|delivery|status_check", required=False),
         }),
         goal_update,
     )
@@ -225,14 +228,16 @@ def register(registry, ctx) -> None:
                 return json.dumps({"ok": False, "error": "superseded_by required when decision=supersede"})
             result = goals.mark_superseded(gid, by_id)
         else:
-            # Auto-check completion criteria
-            if goals.evaluate_completion(gid):
-                result = goals.mark_completed(gid, "auto-completed via criteria")
+            # Auto-check completion -- same moderate evaluator pursue() uses
+            # when a plan exhausts, so the two entry points agree on "done".
+            completed, reason = pursuit.auto_evaluate_completion(goals.get(gid))
+            if completed:
+                result = goals.mark_completed(gid, f"auto-completed via goal.review: {reason}")
             else:
                 return json.dumps({
                     "ok": False,
                     "status": "review",
-                    "message": "Completion criteria not met. Use decision=complete|cancel|continue|supersede.",
+                    "message": f"Completion criteria not met ({reason}). Use decision=complete|cancel|continue|supersede.",
                     "goal": goals.get(gid),
                 })
         return json.dumps({"ok": True, "goal": result}, indent=2)
@@ -264,6 +269,98 @@ def register(registry, ctx) -> None:
             return json.dumps({"ok": False, "error": f"Goal not found: {gid}"})
         steps = goals.generate_plan(gid)
         return json.dumps({"ok": True, "plan": steps}, indent=2)
+
+    def goal_progress(args: dict) -> str:
+        gid = args.get("id")
+        if gid:
+            try:
+                goal = goals.get(gid)
+            except KeyError:
+                return json.dumps({"ok": False, "error": f"Goal not found: {gid}"})
+        else:
+            top = goals.top_open()
+            if not top:
+                return json.dumps({"ok": False, "error": "No open goals"})
+            goal = top
+            gid = goal["id"]
+
+        plan = goals.get_plan(gid)
+        evidence = goal.get("evidence", [])
+        step_results = goal.get("step_results", {})
+        status = goal.get("status", "unknown")
+        failures = goal.get("failures", 0)
+        consecutive_failures = goal.get("consecutive_failures", 0)
+
+        total_steps = len(plan)
+        executed_steps = sum(1 for s in plan if s.get("executed"))
+        completion_pct = int(100 * executed_steps / total_steps) if total_steps else 0
+
+        next_step = None
+        for s in plan:
+            if not s.get("executed"):
+                next_step = s
+                break
+
+        completed_actions = [s.get("action") for s in plan if s.get("executed")]
+        pending_actions = [s.get("action") for s in plan if not s.get("executed")]
+
+        progress_signals = [e for e in evidence if e.get("signal") == "progress"]
+        dead_end_signals = [e for e in evidence if e.get("signal") == "dead_end"]
+
+        created = goal.get("created", "")
+        updated = goal.get("updated", "")
+        age_hours = None
+        try:
+            from datetime import datetime, timezone
+            ct = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            ut = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+            age_hours = round((ut - ct).total_seconds() / 3600, 1)
+        except Exception:
+            pass
+
+        report = {
+            "ok": True,
+            "goal_id": gid,
+            "text": goal.get("text", ""),
+            "status": status,
+            "kind": goal.get("kind", "open"),
+            "priority": goal.get("priority", 5),
+            "completion_pct": completion_pct,
+            "plan_summary": {
+                "total_steps": total_steps,
+                "executed_steps": executed_steps,
+                "completed_actions": completed_actions,
+                "pending_actions": pending_actions,
+                "next_step": next_step,
+            },
+            "evidence_summary": {
+                "total": len(evidence),
+                "progress_signals": len(progress_signals),
+                "dead_end_signals": len(dead_end_signals),
+                "latest": evidence[-1]["text"][:200] if evidence else None,
+            },
+            "step_results_available": list(step_results.keys()),
+            "failures": {
+                "total": failures,
+                "consecutive": consecutive_failures,
+            },
+            "timing": {
+                "created": created,
+                "updated": updated,
+                "age_hours": age_hours,
+            },
+        }
+
+        if status == "stalled":
+            report["recommendation"] = "Goal is stalled. Consider re-planning, reviving, or cancelling."
+        elif consecutive_failures >= 2:
+            report["recommendation"] = f"Goal has {consecutive_failures} consecutive failures. Consider a different approach."
+        elif completion_pct >= 80 and not next_step:
+            report["recommendation"] = "Goal appears nearly complete. Consider reviewing and completing."
+        elif completed_actions and "deliver" not in completed_actions and goal.get("kind") == "delivery":
+            report["recommendation"] = "Delivery goal needs a deliver step to produce an artifact."
+
+        return json.dumps(report, indent=2)
 
     registry.register_from_def(
         tool("goal.review", "Sign off on a goal in REVIEW state.",
@@ -303,4 +400,9 @@ def register(registry, ctx) -> None:
         tool("goal.generate_plan", "Assign the default plan steps for a goal's kind.",
              {"id": _p("string", "Goal ID")}),
         goal_generate_plan,
+    )
+    registry.register_from_def(
+        tool("goal.progress", "Structured progress report for a goal: completion %, evidence, next steps, recommendations.",
+             {"id": _p("string", "Goal ID (default: top open goal)", required=False)}),
+        goal_progress,
     )

@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import types
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,7 +62,7 @@ from tools import kairos_ns
 from tools import ide_ns
 from goals import GoalStore, GOALS_PATH
 import supabase_sync
-from dashboard import configure as configure_dashboard, start_dashboard
+from dashboard import configure as configure_dashboard, start_dashboard, stop_dashboard
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,8 @@ K10_DIR = Path(__file__).resolve().parent
 SCHEDULE_PATH = K10_DIR / "schedule.json"
 LOG_PATH = K10_DIR / "host.log"
 RECONNECT_WAIT = int(os.environ.get("K10_RECONNECT_WAIT", "5"))
+PING_INTERVAL = int(os.environ.get("K10_PING_INTERVAL", "20"))
+WS_CONNECT_TIMEOUT = int(os.environ.get("K10_WS_CONNECT_TIMEOUT", "30"))
 DASHBOARD_PORT = int(os.environ.get("K10_DASHBOARD_PORT", "8765"))
 
 MCP_ENDPOINT = os.environ.get("K10_MCP_ENDPOINT", "")
@@ -138,7 +141,7 @@ def _register_dynamic_tool(registry: ToolRegistry, tool_def: dict, handler_fn):
 
 
 def _log_tool_call(name: str, args: dict, ok: bool, duration_ms: float,
-                   error: str | None = None):
+                   result: str | None = None, error: str | None = None):
     detail = {
         "tool": name,
         "namespace": name.split(".", 1)[0],
@@ -174,6 +177,7 @@ def _dedup_key(name: str, args: dict) -> str:
     raw = json.dumps({"n": name, "a": args}, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
+
 def handle_tool(name: str, a: dict | None = None) -> str:
     if _state is None:
         raise RuntimeError("Host not booted")
@@ -202,7 +206,8 @@ def handle_tool(name: str, a: dict | None = None) -> str:
                 oldest = min(_dedup_cache.keys(), key=lambda k: _dedup_cache[k][0])
                 del _dedup_cache[oldest]
             _dedup_cache[_dedup_key(name, args)] = (time.time(), result)
-        _log_tool_call(name, args, ok=True, duration_ms=(time.time() - start) * 1000)
+        _log_tool_call(name, args, ok=True, duration_ms=(time.time() - start) * 1000,
+                       result=result)
         return result
     except Exception as e:
         _log_tool_call(name, args, ok=False,
@@ -268,7 +273,9 @@ def boot() -> HostState:
         call_tool=handle_tool,
         workspace=WORKSPACE,
     )
-    engine.start()
+    # NOTE: engine.start() is deliberately deferred until after _state is
+    # assigned below. Its reflection thread calls handle_tool on the first
+    # tick, which raises "Host not booted" while _state is None.
 
     kairos = KairosEngine(read_episodes, home=Path.home() / "kairos")
     chrono_globals = {
@@ -391,12 +398,17 @@ def boot() -> HostState:
         goals=goals,
         handle_tool=handle_tool,
         read_episodes=read_episodes,
+        hermes_bridge=hermes_bridge,
+        ws_health=get_ws_health,
         _start_time=_start_time,
     )
     dashboard_url = start_dashboard(DASHBOARD_PORT)
     _state.dashboard_url = dashboard_url
     log.info("Dashboard UI → %s", dashboard_url)
 
+    # Cognition + chrono background threads both call handle_tool, so they
+    # must start only now that _state is assigned (boot-order guard above).
+    engine.start()
     chrono.reset_last_run()
     chrono.start()
 
@@ -417,19 +429,70 @@ def _do_shutdown(state: HostState):
     state.dream.ping()
     state.chrono.stop()
     state.engine.stop()
+    _tool_call_pool.shutdown(wait=False, cancel_futures=True)
+    stop_dashboard()
     save_soul(state.soul)
     log.info("Shutdown complete.")
 
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
-def _reply(ws, msg_id, result=None, error=None):
+_ws_send_lock = threading.Lock()
+_live_ws_lock = threading.Lock()
+_tool_call_pool = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("K10_TOOL_CALL_WORKERS", "8"))
+)
+_live_ws: dict = {"conn": None, "generation": 0}
+
+# Connection-health tracking, surfaced to the dashboard via get_ws_health().
+_ws_health = {
+    "connected": False, "connect_count": 0, "disconnect_count": 0,
+    "current_connect_ts": None, "last_connect_ts": None,
+    "last_disconnect_ts": None, "last_disconnect_reason": None,
+}
+_ws_health_lock = threading.Lock()
+
+
+def get_ws_health() -> dict:
+    with _ws_health_lock:
+        h = dict(_ws_health)
+    h["current_uptime_seconds"] = (
+        round(time.time() - h["current_connect_ts"])
+        if h["connected"] and h["current_connect_ts"] else 0
+    )
+    return h
+
+
+def _reply(msg_id, result=None, error=None, generation=None):
     frame = {"jsonrpc": "2.0", "id": msg_id}
     frame["error" if error else "result"] = (
         {"code": -32000, "message": str(error)} if error else result)
-    ws.send(json.dumps(frame))
+    with _live_ws_lock:
+        conn = _live_ws["conn"]
+        current_generation = _live_ws["generation"]
+    if generation is not None and generation != current_generation:
+        log.warning("Dropped stale reply for id=%s from connection #%s", msg_id, generation)
+        return
+    if conn is None:
+        log.warning("Dropped reply for id=%s — no live connection", msg_id)
+        return
+    try:
+        with _ws_send_lock:
+            conn.send(json.dumps(frame))
+    except Exception as e:
+        log.warning("Failed to send reply for id=%s: %s", msg_id, e)
 
 
-def _handle(ws, raw: str, state: HostState):
+def _run_tool_call(msg_id, tname, args, generation):
+    try:
+        text = handle_tool(tname, args)
+        _reply(msg_id, {"content": [{"type": "text", "text": text}]}, generation=generation)
+        log.info("→ ok  %s", tname)
+    except Exception as e:
+        log.warning("→ err %s: %s", tname, e)
+        _reply(msg_id, error=str(e), generation=generation)
+
+
+def _handle(raw: str, state: HostState):
     if shutdown_requested.is_set():
         return
     try:
@@ -445,7 +508,7 @@ def _handle(ws, raw: str, state: HostState):
 
     if method == "initialize":
         log.info("← initialize")
-        _reply(ws, msg_id, {
+        _reply(msg_id, {
             "protocolVersion": "2024-11-05",
             "capabilities": {
                 "tools": {},
@@ -465,67 +528,99 @@ def _handle(ws, raw: str, state: HostState):
         log.info("← tools/list (namespace=%s tier=%s → %d/%d tools)",
                  params.get("namespace", "*"), params.get("tier", "*"),
                  len(result["tools"]), result["total"])
-        _reply(ws, msg_id, result)
+        _reply(msg_id, result)
     elif method == "tools/namespaces":
         summary = state.registry.namespace_summary()
         log.info("← tools/namespaces (%d namespaces)", len(summary))
-        _reply(ws, msg_id, {"namespaces": summary})
+        _reply(msg_id, {"namespaces": summary})
     elif method == "tools/search":
         query = params.get("query", "")
         limit = params.get("limit", 20)
         results = state.registry.search(query, limit=limit)
         log.info("← tools/search %r (%d results)", query, len(results))
-        _reply(ws, msg_id, {"tools": results})
+        _reply(msg_id, {"tools": results})
     elif method == "tools/call":
         tname = params.get("name", "")
         args = params.get("arguments") or {}
         log.info("← %s", tname)
         state.dream.ping()
-        try:
-            text = handle_tool(tname, args)
-            _reply(ws, msg_id, {"content": [{"type": "text", "text": text}]})
-            log.info("→ ok  %s", tname)
-        except Exception as e:
-            log.warning("→ err %s: %s", tname, e)
-            _reply(ws, msg_id, error=str(e))
+        with _live_ws_lock:
+            generation = _live_ws["generation"]
+        _tool_call_pool.submit(_run_tool_call, msg_id, tname, args, generation)
     elif method == "ping":
-        _reply(ws, msg_id, {})
+        _reply(msg_id, {})
     elif method.startswith("notifications/"):
         pass
     else:
-        _reply(ws, msg_id, error=f"Method not implemented: {method}")
+        _reply(msg_id, error=f"Method not implemented: {method}")
 
 
 def _run_ws(state: HostState):
     ws = websocket.WebSocket()
-    ws.connect(MCP_ENDPOINT, timeout=10)
-    ws.settimeout(300)
+    ws.connect(MCP_ENDPOINT, timeout=WS_CONNECT_TIMEOUT)
+    ws.settimeout(PING_INTERVAL)
+    with _live_ws_lock:
+        _live_ws["generation"] += 1
+        _live_ws["conn"] = ws
+        generation = _live_ws["generation"]
+    now = time.time()
+    with _ws_health_lock:
+        _ws_health["connected"] = True
+        _ws_health["connect_count"] += 1
+        _ws_health["current_connect_ts"] = now
+        _ws_health["last_connect_ts"] = now
     log.info("Connected — %d tools ready", state.registry.tool_count)
     try:
         while not shutdown_requested.is_set():
             try:
                 raw = ws.recv()
                 if raw:
-                    _handle(ws, raw, state)
+                    _handle(raw, state)
             except websocket.WebSocketTimeoutException:
                 if shutdown_requested.is_set():
                     break
-                ws.ping()
+                with _ws_send_lock:
+                    ws.ping()
     finally:
+        with _live_ws_lock:
+            if _live_ws["conn"] is ws and _live_ws["generation"] == generation:
+                _live_ws["conn"] = None
+        with _ws_health_lock:
+            _ws_health["connected"] = False
         ws.close()
 
 
 def run():
     state = boot()
     log.info("=== K10-Δ Host v6.0 — boot #%d ===", state.soul["boot_count"])
+    reconnect_attempt = 0
     while not shutdown_requested.is_set():
+        with _ws_health_lock:
+            prior_connect_count = _ws_health.get("connect_count", 0)
         try:
             _run_ws(state)
+            if shutdown_requested.is_set():
+                reconnect_attempt = 0
         except Exception as e:
             if shutdown_requested.is_set():
                 break
-            log.warning("Disconnected: %s — retry in %ds", e, RECONNECT_WAIT)
-            time.sleep(RECONNECT_WAIT)
+            with _ws_health_lock:
+                connect_count = _ws_health.get("connect_count", 0)
+                last_connect_ts = _ws_health.get("last_connect_ts")
+                _ws_health["disconnect_count"] += 1
+                _ws_health["last_disconnect_ts"] = time.time()
+                _ws_health["last_disconnect_reason"] = str(e)[:300]
+            connected_this_run = connect_count > prior_connect_count
+            if connected_this_run and last_connect_ts and time.time() - last_connect_ts >= max(PING_INTERVAL, RECONNECT_WAIT):
+                reconnect_attempt = 0
+            # Exponential backoff with jitter
+            import random
+            base_wait = RECONNECT_WAIT
+            max_wait = 300  # 5 minutes max
+            wait = min(base_wait * (2 ** reconnect_attempt) + random.uniform(0, 5), max_wait)
+            reconnect_attempt += 1
+            log.warning("Disconnected: %s — retry in %.1fs (attempt %d)", e, wait, reconnect_attempt)
+            time.sleep(wait)
     _do_shutdown(state)
 
 

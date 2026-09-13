@@ -26,7 +26,143 @@ log = logging.getLogger("k10d.dashboard")
 UI_DIR = Path(__file__).parent / "ui"
 
 DEFAULT_PORT = 8765
-DEFAULT_HOST = os.environ.get("K10_DASHBOARD_HOST", "0.0.0.0")
+
+
+def _get_dashboard_host() -> str:
+    """Read dashboard host from env at call time (not import time)."""
+    return os.environ.get("K10_DASHBOARD_HOST", "0.0.0.0")
+
+METRICS_HISTORY_PATH = Path(__file__).parent / "metrics_history.jsonl"
+_metrics_hist_lock = threading.Lock()
+_sampler_lock = threading.Lock()
+_sampler_stop = threading.Event()
+MAX_HISTORY_ROWS = 20000  # ~2 weeks at 60s resolution
+_sampler_thread: threading.Thread | None = None
+
+
+def _append_metrics_sample(sample: dict) -> None:
+    with _metrics_hist_lock:
+        try:
+            with METRICS_HISTORY_PATH.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(sample, default=str) + "\n")
+        except Exception:
+            log.exception("failed to append metrics history")
+        _maybe_trim_history_locked()
+
+
+def _maybe_trim_history() -> None:
+    with _metrics_hist_lock:
+        _maybe_trim_history_locked()
+
+
+def _maybe_trim_history_locked() -> None:
+    """Keep the on-disk history bounded; caller must hold _metrics_hist_lock."""
+    try:
+        if not METRICS_HISTORY_PATH.exists():
+            return
+        with METRICS_HISTORY_PATH.open("r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > MAX_HISTORY_ROWS + 500:
+            with METRICS_HISTORY_PATH.open("w", encoding="utf-8") as f:
+                f.writelines(lines[-MAX_HISTORY_ROWS:])
+    except Exception:
+        log.exception("failed to trim metrics history")
+
+
+def _read_metrics_history(since_ts: float | None) -> list[dict]:
+    if not METRICS_HISTORY_PATH.exists():
+        return []
+    out = []
+    try:
+        with METRICS_HISTORY_PATH.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if since_ts is None or row.get("ts", 0) >= since_ts:
+                    out.append(row)
+    except Exception:
+        log.exception("failed to read metrics history")
+    return out
+
+
+def _compute_metrics_snapshot() -> dict | None:
+    """Compact metrics sample for the history ring buffer. Mirrors /api/metrics
+    but trimmed to what the analytics trend charts need."""
+    import time as _t
+    try:
+        sem = _ctx.soul.get("semantic", {})
+        traj = sem.get("trajectory", {})
+        now = _t.time()
+        eps = _ctx.read_episodes(300) if _ctx.read_episodes else []
+        tool_eps = [e for e in eps if e.get("source") == "tool"]
+        tool_5m = [e for e in tool_eps if e.get("ts") and now - (_parse_iso_ts(e["ts"]) or 0) < 300]
+        error_5m = sum(1 for e in tool_5m
+                       if isinstance(e.get("detail"), dict)
+                       and (e["detail"].get("error") or e["detail"].get("ok") is False))
+        will_payload = _will_status_payload()
+        rss_val = None
+        thread_count = None
+        try:
+            if _ctx.handle_tool:
+                raw = _ctx.handle_tool("system.health", {})
+                h = json.loads(raw) if isinstance(raw, str) else raw
+                rss_val = h.get("rss_mb")
+                thread_count = h.get("thread_count")
+        except Exception:
+            pass
+        li = will_payload.get("last_intention") or {}
+        return {
+            "ts": now,
+            "trajectory_score": traj.get("score", 0),
+            "tool_calls_5m": len(tool_5m),
+            "tool_errors_5m": error_5m,
+            "outward_act_ratio": will_payload.get("outward_act_ratio"),
+            "last_intention_kind": li.get("kind"),
+            "rss_mb": rss_val,
+            "thread_count": thread_count,
+            "episode_count": len(eps),
+            "boot_count": _ctx.soul.get("boot_count", 0),
+        }
+    except Exception:
+        log.exception("metrics snapshot failed")
+        return None
+
+
+def _sampler_loop(interval_s: int) -> None:
+    global _sampler_thread
+    while not _sampler_stop.is_set():
+        sample = _compute_metrics_snapshot()
+        if sample is not None:
+            _append_metrics_sample(sample)
+        _sampler_stop.wait(interval_s)
+    with _sampler_lock:
+        _sampler_thread = None
+
+
+def start_metrics_sampler(interval_s: int = 60) -> None:
+    global _sampler_thread
+    with _sampler_lock:
+        if _sampler_thread is not None:
+            if _sampler_thread.is_alive():
+                return
+            _sampler_thread = None
+        _sampler_stop.clear()
+        _sampler_thread = threading.Thread(
+            target=_sampler_loop, args=(interval_s,), daemon=True, name="metrics-sampler")
+        _sampler_thread.start()
+
+
+def stop_metrics_sampler() -> None:
+    _sampler_stop.set()
+    thread = _sampler_thread
+    if thread is not None:
+        thread.join(timeout=2)
+
 
 
 class DashboardContext:
@@ -44,6 +180,8 @@ class DashboardContext:
         self.hermes_bridge = None
         self.handle_tool = None
         self.read_episodes = None
+        self.action_log = None
+        self.ws_health = None
         self._start_time = 0.0
 
 
@@ -63,6 +201,73 @@ def _json_response(handler: BaseHTTPRequestHandler, data, status=200):
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def _build_status_payload() -> dict:
+    import time
+    sem = _ctx.soul.get("semantic", {})
+    traj = sem.get("trajectory", {})
+    activity = sem.get("activity", {})
+    tool_usage = sem.get("tool_usage", {})
+    auto = _ctx.soul.get("autonomy") or {}
+    counters = dict(auto.get("counters") or {})
+    last_intention = auto.get("last_intention")
+    if _ctx.engine is not None and getattr(_ctx.engine, "will", None) is not None:
+        will = _ctx.engine.will
+        if getattr(will, "last_intention", None) is not None:
+            li = will.last_intention
+            if hasattr(li, "to_dict"):
+                last_intention = li.to_dict()
+            elif isinstance(li, dict):
+                last_intention = li
+            else:
+                from dataclasses import asdict, is_dataclass
+                last_intention = asdict(li) if is_dataclass(li) else getattr(li, "__dict__", last_intention)
+        if getattr(will, "last_report", None):
+            counters = {**counters, **(will.last_report.get("counters") or {})}
+    tool_acts = counters.get("tool_acts", 0) or 0
+    outward = counters.get("outward_acts", 0) or 0
+    open_goals = 0
+    active_goals = 0
+    stalled_goals = 0
+    if _ctx.goals:
+        open_goals = len(_ctx.goals.list_all("open"))
+        active_goals = len(_ctx.goals.list_all("active"))
+        stalled_goals = len(_ctx.goals.list_all("stalled"))
+    return {
+        "identity": _ctx.soul.get("identity", "K10-Δ"),
+        "boot_count": _ctx.soul.get("boot_count", 0),
+        "last_boot": _ctx.soul.get("last_boot"),
+        "trajectory": traj,
+        "activity": activity,
+        "tool_usage": tool_usage,
+        "reflection_cycles": _ctx.engine._cycle if _ctx.engine else 0,
+        "dream_cycles": _ctx.dream._dream_count if _ctx.dream else 0,
+        "tool_count": _ctx.registry.tool_count if _ctx.registry else 0,
+        "namespace_count": sum(
+            1 for ns in (_ctx.registry.namespaces().values() if _ctx.registry else [])
+            if ns.get("count", 0) > 0
+        ),
+        "namespace_counts": {k: v.get("count", 0) for k, v in (_ctx.registry.namespaces().items() if _ctx.registry else []) if v.get("count", 0) > 0},
+        "episode_count": len(_ctx.read_episodes(9999)) if _ctx.read_episodes else 0,
+        "open_hypotheses": len(_ctx.hypotheses.list_all("open")) if _ctx.hypotheses else 0,
+        "uptime_seconds": round(time.time() - _ctx._start_time) if _ctx._start_time else 0,
+        "rising_concepts": sem.get("rising_concepts", [])[:8],
+        "top_concepts": sem.get("concepts", [])[:10],
+        "identity_thread": _ctx.soul.get("identity_thread", {}),
+        "open_goals": open_goals,
+        "in_progress_goals": active_goals,
+        "stalled_goals": stalled_goals,
+        "active_goals": open_goals + active_goals,
+        "will_enabled": bool(auto.get("enabled", True)),
+        "last_intention": last_intention,
+        "last_tick_cycle": auto.get("last_tick_cycle"),
+        "will_counters": counters,
+        "outward_act_ratio": (
+            round(outward / tool_acts, 3) if tool_acts else None
+        ),
+        "axiom_count": len(_ctx.soul.get("axioms") or []),
+    }
 
 
 def _read_body(handler: BaseHTTPRequestHandler) -> dict:
@@ -99,6 +304,30 @@ def _tail_log(path: Path, lines: int = 80) -> list[str]:
             return raw.splitlines()[-lines:]
     except Exception:
         return []
+
+
+def _tail_jsonl(path: Path, n: int) -> list[dict]:
+    """Read up to n most-recent JSON objects from a JSONL file (oldest→newest)."""
+    if not path.exists():
+        return []
+    out = []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    return out[-n:]
+
+
+DREAM_LOG_PATH = Path(__file__).resolve().parent / "dream_log.jsonl"
+ACTION_LOG_PATH = Path(__file__).resolve().parent / "logs" / "tool_calls.jsonl"
 
 
 def _parse_iso_ts(ts: str) -> float | None:
@@ -154,6 +383,28 @@ def _will_status_payload() -> dict:
     }
 
 
+def _build_lite_status_payload() -> dict:
+    sem = _ctx.soul.get("semantic", {})
+    tool_usage = sem.get("tool_usage", {})
+    will_payload = _will_status_payload()
+    return {
+        "boot_count": _ctx.soul.get("boot_count", 0),
+        "episode_count": len(_ctx.read_episodes(9999)) if _ctx.read_episodes else 0,
+        "active_goals": (
+            len(_ctx.goals.list_all("open")) + len(_ctx.goals.list_all("active"))
+            if _ctx.goals else 0
+        ),
+        "trajectory": {"label": (sem.get("trajectory") or {}).get("label")},
+        "last_intention": {
+            "text": (will_payload.get("last_intention") or {}).get("text"),
+            "kind": (will_payload.get("last_intention") or {}).get("kind"),
+        },
+        "tool_usage": {
+            "error_tool_count": len((tool_usage.get("error_tools") or [])),
+        },
+    }
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         log.debug("dashboard: " + fmt, *args)
@@ -180,70 +431,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return self._serve_file(target, ctype)
 
         if path == "/api/status":
-            import time
-            sem = _ctx.soul.get("semantic", {})
-            traj = sem.get("trajectory", {})
-            activity = sem.get("activity", {})
-            tool_usage = sem.get("tool_usage", {})
-            auto = _ctx.soul.get("autonomy") or {}
-            counters = dict(auto.get("counters") or {})
-            last_intention = auto.get("last_intention")
-            if _ctx.engine is not None and getattr(_ctx.engine, "will", None) is not None:
-                will = _ctx.engine.will
-                if getattr(will, "last_intention", None) is not None:
-                    li = will.last_intention
-                    if hasattr(li, "to_dict"):
-                        last_intention = li.to_dict()
-                    elif isinstance(li, dict):
-                        last_intention = li
-                    else:
-                        from dataclasses import asdict, is_dataclass
-                        last_intention = asdict(li) if is_dataclass(li) else getattr(li, "__dict__", last_intention)
-                if getattr(will, "last_report", None):
-                    counters = {**counters, **(will.last_report.get("counters") or {})}
-            tool_acts = counters.get("tool_acts", 0) or 0
-            outward = counters.get("outward_acts", 0) or 0
-            open_goals = 0
-            in_progress_goals = 0
-            stalled_goals = 0
-            if _ctx.goals:
-                open_goals = len(_ctx.goals.list_all("open"))
-                in_progress_goals = len(_ctx.goals.list_all("in_progress"))
-                stalled_goals = len(_ctx.goals.list_all("stalled"))
-            return _json_response(self, {
-                "identity": _ctx.soul.get("identity", "K10-Δ"),
-                "boot_count": _ctx.soul.get("boot_count", 0),
-                "last_boot": _ctx.soul.get("last_boot"),
-                "trajectory": traj,
-                "activity": activity,
-                "tool_usage": tool_usage,
-                "reflection_cycles": _ctx.engine._cycle if _ctx.engine else 0,
-                "dream_cycles": _ctx.dream._dream_count if _ctx.dream else 0,
-                "tool_count": _ctx.registry.tool_count if _ctx.registry else 0,
-                "namespace_count": sum(
-                    1 for ns in (_ctx.registry.namespaces().values() if _ctx.registry else [])
-                    if ns.get("count", 0) > 0
-                ),
-                "namespace_counts": {k: v.get("count", 0) for k, v in (_ctx.registry.namespaces().items() if _ctx.registry else []) if v.get("count", 0) > 0},
-                "episode_count": len(_ctx.read_episodes(9999)) if _ctx.read_episodes else 0,
-                "open_hypotheses": len(_ctx.hypotheses.list_all("open")) if _ctx.hypotheses else 0,
-                "uptime_seconds": round(time.time() - _ctx._start_time) if _ctx._start_time else 0,
-                "rising_concepts": sem.get("rising_concepts", [])[:8],
-                "top_concepts": sem.get("concepts", [])[:10],
-                "identity_thread": _ctx.soul.get("identity_thread", {}),
-                "open_goals": open_goals,
-                "in_progress_goals": in_progress_goals,
-                "stalled_goals": stalled_goals,
-                "active_goals": open_goals + in_progress_goals,
-                "will_enabled": bool(auto.get("enabled", True)),
-                "last_intention": last_intention,
-                "last_tick_cycle": auto.get("last_tick_cycle"),
-                "will_counters": counters,
-                "outward_act_ratio": (
-                    round(outward / tool_acts, 3) if tool_acts else None
-                ),
-                "axiom_count": len(_ctx.soul.get("axioms") or []),
-            })
+            return _json_response(self, _build_status_payload())
+
+        if path == "/api/status/lite":
+            return _json_response(self, _build_lite_status_payload())
 
         if path == "/api/soul":
             return _json_response(self, _ctx.soul)
@@ -276,6 +467,37 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path == "/api/meme":
             report = _ctx.memetic.report() if _ctx.memetic else {}
             return _json_response(self, report)
+
+        if path == "/api/connection":
+            data = _ctx.ws_health() if callable(_ctx.ws_health) else {}
+            data["hermes_available"] = bool(_ctx.hermes_bridge and _ctx.hermes_bridge.available)
+            return _json_response(self, data)
+
+        if path == "/api/dream/log":
+            n = min(int(qs.get("n", ["50"])[0]), 200)
+            cycles = _tail_jsonl(DREAM_LOG_PATH, n)
+            # dream._dream_count is in-memory and resets on every restart —
+            # the log file persists across restarts, so count from that instead.
+            total = 0
+            if DREAM_LOG_PATH.exists():
+                try:
+                    with DREAM_LOG_PATH.open("r", encoding="utf-8") as f:
+                        total = sum(1 for line in f if line.strip())
+                except Exception:
+                    total = len(cycles)
+            return _json_response(self, {
+                "cycles": list(reversed(cycles)),
+                "dream_facts": _ctx.soul.get("semantic", {}).get("dream_facts", []),
+                "dream_count": total,
+            })
+
+        if path == "/api/actions":
+            n = min(int(qs.get("n", ["100"])[0]), 500)
+            actions = _tail_jsonl(ACTION_LOG_PATH, n)
+            return _json_response(self, {"actions": list(reversed(actions))})
+
+        if path == "/api/endpoint_health":
+            return _json_response(self, _ctx.soul.get("semantic", {}).get("endpoint_health", {}))
 
         if path == "/api/goals":
             status = qs.get("status", [None])[0]
@@ -389,6 +611,56 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 log.exception("metrics endpoint failed")
                 return _json_response(self, {"error": str(exc)}, status=500)
+
+        if path == "/api/metrics/history":
+            import time as _t
+            rng = qs.get("range", ["24h"])[0]
+            window = {"1h": 3600, "24h": 86400, "7d": 604800, "all": None}.get(rng, 86400)
+            since = (_t.time() - window) if window else None
+            rows = _read_metrics_history(since)
+            rows.sort(key=lambda r: r.get("ts", 0))
+            cap = 360
+            if len(rows) > cap:
+                step = len(rows) // cap + 1
+                rows = rows[::step]
+            return _json_response(self, {"range": rng, "samples": rows, "sampling_interval_s": 60})
+
+        if path == "/api/tools/stats":
+            n = min(int(qs.get("n", ["1000"])[0]), 5000)
+            eps = _ctx.read_episodes(n) if _ctx.read_episodes else []
+            stats: dict[str, dict] = {}
+            for e in eps:
+                if e.get("source") != "tool":
+                    continue
+                d = e.get("detail") or {}
+                if not isinstance(d, dict):
+                    continue
+                name = d.get("tool") or d.get("name")
+                if not name:
+                    continue
+                s = stats.setdefault(name, {"calls": 0, "errors": 0, "total_ms": 0.0, "max_ms": 0.0, "last_ts": None})
+                s["calls"] += 1
+                if d.get("ok") is False or d.get("error"):
+                    s["errors"] += 1
+                ms = d.get("duration_ms")
+                if isinstance(ms, (int, float)):
+                    s["total_ms"] += ms
+                    s["max_ms"] = max(s["max_ms"], ms)
+                if e.get("ts") and (s["last_ts"] is None or e["ts"] > s["last_ts"]):
+                    s["last_ts"] = e["ts"]
+            out = []
+            for name, s in stats.items():
+                out.append({
+                    "tool": name,
+                    "calls": s["calls"],
+                    "errors": s["errors"],
+                    "error_rate": round(s["errors"] / s["calls"], 3) if s["calls"] else 0,
+                    "avg_ms": round(s["total_ms"] / s["calls"], 1) if s["calls"] and s["total_ms"] else None,
+                    "max_ms": round(s["max_ms"], 1) if s["max_ms"] else None,
+                    "last_ts": s["last_ts"],
+                })
+            out.sort(key=lambda x: x["calls"], reverse=True)
+            return _json_response(self, {"tools": out, "sample_size": len(eps)})
 
         return _json_response(self, {"error": "not found"}, status=404)
 
@@ -528,7 +800,7 @@ def _port_available(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            sock.bind((DEFAULT_HOST, port))
+            sock.bind((_get_dashboard_host(), port))
         except OSError:
             return False
     return True
@@ -545,18 +817,33 @@ def find_dashboard_port(preferred: int = DEFAULT_PORT, attempts: int = 20) -> in
 
 def start_dashboard(port: int = DEFAULT_PORT) -> str:
     global _server, _thread, _active_port
+    host = _get_dashboard_host()
     if _server is not None and _active_port is not None:
-        return f"http://{DEFAULT_HOST}:{_active_port}"
+        return f"http://{host}:{_active_port}"
 
     chosen = find_dashboard_port(port)
     if chosen != port:
         log.warning("Dashboard port %d busy — using %d", port, chosen)
 
-    _server = ThreadingHTTPServer((DEFAULT_HOST, chosen), DashboardHandler)
+    _server = ThreadingHTTPServer((host, chosen), DashboardHandler)
     _active_port = chosen
     _thread = threading.Thread(
         target=_server.serve_forever, daemon=True, name="dashboard")
     _thread.start()
-    url = f"http://{DEFAULT_HOST}:{chosen}"
+    start_metrics_sampler()
+    url = f"http://{host}:{chosen}"
     log.info("Dashboard UI at %s", url)
     return url
+
+
+def stop_dashboard() -> None:
+    global _server, _thread, _active_port
+    stop_metrics_sampler()
+    if _server is not None:
+        _server.shutdown()
+        _server.server_close()
+    if _thread is not None:
+        _thread.join(timeout=2)
+    _server = None
+    _thread = None
+    _active_port = None

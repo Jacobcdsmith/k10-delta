@@ -75,7 +75,7 @@ def _safe_source_path(rel: str) -> Path:
         pass
     if not (str(resolved).startswith(str(K10_DIR) + os.sep)
             or resolved == K10_DIR or K10_DIR in resolved.parents):
-        raise ValueError(f"Path outside K10_DIR: {rel}")
+        raise ValueError(f"Path outside K10_DIR ({K10_DIR}): {rel!r} resolved to {resolved}")
     return resolved
 
 
@@ -83,7 +83,7 @@ def _check_source_extension(path: Path, allowed: frozenset) -> None:
     suffix = path.suffix.lower()
     if suffix not in allowed:
         raise ValueError(
-            f"File extension '{suffix}' not allowed for this operation "
+            f"File extension '{suffix}' not allowed for this operation on {path.name} "
             f"(allowed: {sorted(allowed)})")
 
 
@@ -181,6 +181,10 @@ class SelfModEngine:
     def read_source(self, rel: str) -> str:
         path = _safe_source_path(rel)
         _check_source_extension(path, _READ_EXTENSIONS)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{rel!r} not found at {path} (K10_DIR: {K10_DIR}); "
+                "use self.list_sources to see available files")
         return path.read_text(encoding="utf-8", errors="replace")
 
     def list_sources(self) -> list[dict]:
@@ -406,6 +410,18 @@ class SelfModEngine:
 
     def add_revoke_hook(self, hook) -> None:
         self._revoke_hooks.append(hook)
+
+    def health_check_tool(self, name: str) -> dict:
+        """Verify a loaded tool is still registered without invoking it."""
+        tools = self._get_tools()
+        tool_def = None
+        for t in tools:
+            if t["name"] == name:
+                tool_def = t
+                break
+        if tool_def is None:
+            return {"ok": False, "error": f"Tool not found: {name}"}
+        return {"ok": True, "name": name, "status": "registered"}
 
     # ── Tool invocation ──────────────────────────────────────────────────────────
 

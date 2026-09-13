@@ -1,4 +1,4 @@
-"""fs.* tool handlers — workspace and k10_delta scoped."""
+"""fs.* tool handlers."""
 
 from __future__ import annotations
 
@@ -50,6 +50,19 @@ def resolve_path(rel: str, workspace: Path) -> Path:
     return p
 
 
+def _not_found_message(rel: str, workspace: Path) -> str:
+    norm = normalize_rel_path(rel)
+    raw = Path(norm)
+    if raw.is_absolute():
+        return f"{rel!r} not found at {raw.resolve()}"
+    ws_candidate = (workspace / raw).resolve()
+    root_candidate = (K10_ROOT / raw).resolve()
+    return (
+        f"{rel!r} not found under workspace ({ws_candidate}) or K10_ROOT ({root_candidate}); "
+        "use fs.list or fs.find to locate the correct path first"
+    )
+
+
 def _fmt_size(n: int | None) -> str | None:
     if n is None:
         return None
@@ -89,7 +102,7 @@ def register(registry, ctx) -> None:
         rel = args.get("path", ".")
         p = resolve_path(rel, workspace)
         if not p.exists():
-            raise FileNotFoundError(rel)
+            raise FileNotFoundError(_not_found_message(rel, workspace))
         if not p.is_dir():
             raise NotADirectoryError(rel)
         entries = [_file_entry(item) for item in sorted(p.iterdir())]
@@ -110,7 +123,7 @@ def register(registry, ctx) -> None:
     def read_file(args: dict) -> str:
         p = resolve_path(args["path"], workspace)
         if not p.exists():
-            raise FileNotFoundError(args["path"])
+            raise FileNotFoundError(_not_found_message(args["path"], workspace))
         if not p.is_file():
             raise IsADirectoryError(args["path"])
         return p.read_text(encoding=_TEXT_ENCODING, errors="replace")
@@ -124,7 +137,7 @@ def register(registry, ctx) -> None:
     def delete_file(args: dict) -> str:
         p = resolve_path(args["path"], workspace)
         if not p.exists():
-            raise FileNotFoundError(args["path"])
+            raise FileNotFoundError(_not_found_message(args["path"], workspace))
         if p.is_dir():
             raise IsADirectoryError(args["path"])
         p.unlink()
@@ -133,7 +146,7 @@ def register(registry, ctx) -> None:
     def file_info(args: dict) -> str:
         p = resolve_path(args["path"], workspace)
         if not p.exists():
-            raise FileNotFoundError(args["path"])
+            raise FileNotFoundError(_not_found_message(args["path"], workspace))
         entry = _file_entry(p)
         if p.is_file():
             entry["lines"] = len(
@@ -145,7 +158,7 @@ def register(registry, ctx) -> None:
         rel = args.get("path", ".")
         root = resolve_path(rel, workspace)
         if not root.exists():
-            raise FileNotFoundError(rel)
+            raise FileNotFoundError(_not_found_message(rel, workspace))
         max_results = min(int(args.get("max", 50)), 200)
         hits: list[dict] = []
         for dirpath, _, filenames in os.walk(root):
