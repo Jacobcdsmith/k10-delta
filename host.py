@@ -435,6 +435,7 @@ def _do_shutdown(state: HostState):
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
 _ws_send_lock = threading.Lock()
+_live_ws_lock = threading.Lock()
 _tool_call_pool = ThreadPoolExecutor(
     max_workers=int(os.environ.get("K10_TOOL_CALL_WORKERS", "8"))
 )
@@ -463,8 +464,9 @@ def _reply(msg_id, result=None, error=None, generation=None):
     frame = {"jsonrpc": "2.0", "id": msg_id}
     frame["error" if error else "result"] = (
         {"code": -32000, "message": str(error)} if error else result)
-    conn = _live_ws["conn"]
-    current_generation = _live_ws["generation"]
+    with _live_ws_lock:
+        conn = _live_ws["conn"]
+        current_generation = _live_ws["generation"]
     if generation is not None and generation != current_generation:
         log.warning("Dropped stale reply for id=%s from connection #%s", msg_id, generation)
         return
@@ -540,7 +542,8 @@ def _handle(raw: str, state: HostState):
         args = params.get("arguments") or {}
         log.info("← %s", tname)
         state.dream.ping()
-        generation = _live_ws["generation"]
+        with _live_ws_lock:
+            generation = _live_ws["generation"]
         _tool_call_pool.submit(_run_tool_call, msg_id, tname, args, generation)
     elif method == "ping":
         _reply(msg_id, {})
@@ -554,9 +557,10 @@ def _run_ws(state: HostState):
     ws = websocket.WebSocket()
     ws.connect(MCP_ENDPOINT, timeout=WS_CONNECT_TIMEOUT)
     ws.settimeout(PING_INTERVAL)
-    _live_ws["generation"] += 1
-    _live_ws["conn"] = ws
-    generation = _live_ws["generation"]
+    with _live_ws_lock:
+        _live_ws["generation"] += 1
+        _live_ws["conn"] = ws
+        generation = _live_ws["generation"]
     now = time.time()
     with _ws_health_lock:
         _ws_health["connected"] = True
@@ -576,8 +580,9 @@ def _run_ws(state: HostState):
                 with _ws_send_lock:
                     ws.ping()
     finally:
-        if _live_ws["conn"] is ws and _live_ws["generation"] == generation:
-            _live_ws["conn"] = None
+        with _live_ws_lock:
+            if _live_ws["conn"] is ws and _live_ws["generation"] == generation:
+                _live_ws["conn"] = None
         with _ws_health_lock:
             _ws_health["connected"] = False
         ws.close()
@@ -590,14 +595,18 @@ def run():
     while not shutdown_requested.is_set():
         try:
             _run_ws(state)
-            reconnect_attempt = 0  # Reset on successful connection
+            if shutdown_requested.is_set():
+                reconnect_attempt = 0
         except Exception as e:
             if shutdown_requested.is_set():
                 break
             with _ws_health_lock:
+                last_connect_ts = _ws_health.get("last_connect_ts")
                 _ws_health["disconnect_count"] += 1
                 _ws_health["last_disconnect_ts"] = time.time()
                 _ws_health["last_disconnect_reason"] = str(e)[:300]
+            if last_connect_ts and time.time() - last_connect_ts >= max(PING_INTERVAL, RECONNECT_WAIT):
+                reconnect_attempt = 0
             # Exponential backoff with jitter
             import random
             base_wait = RECONNECT_WAIT

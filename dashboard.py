@@ -34,6 +34,7 @@ def _get_dashboard_host() -> str:
 
 METRICS_HISTORY_PATH = Path(__file__).parent / "metrics_history.jsonl"
 _metrics_hist_lock = threading.Lock()
+_sampler_lock = threading.Lock()
 MAX_HISTORY_ROWS = 20000  # ~2 weeks at 60s resolution
 _sampler_thread: threading.Thread | None = None
 
@@ -45,11 +46,16 @@ def _append_metrics_sample(sample: dict) -> None:
                 f.write(json.dumps(sample, default=str) + "\n")
         except Exception:
             log.exception("failed to append metrics history")
-    _maybe_trim_history()
+        _maybe_trim_history_locked()
 
 
 def _maybe_trim_history() -> None:
-    """Keep the on-disk history bounded; cheap line-count check."""
+    with _metrics_hist_lock:
+        _maybe_trim_history_locked()
+
+
+def _maybe_trim_history_locked() -> None:
+    """Keep the on-disk history bounded; caller must hold _metrics_hist_lock."""
     try:
         if not METRICS_HISTORY_PATH.exists():
             return
@@ -137,11 +143,12 @@ def _sampler_loop(interval_s: int) -> None:
 
 def start_metrics_sampler(interval_s: int = 60) -> None:
     global _sampler_thread
-    if _sampler_thread is not None:
-        return
-    _sampler_thread = threading.Thread(
-        target=_sampler_loop, args=(interval_s,), daemon=True, name="metrics-sampler")
-    _sampler_thread.start()
+    with _sampler_lock:
+        if _sampler_thread is not None:
+            return
+        _sampler_thread = threading.Thread(
+            target=_sampler_loop, args=(interval_s,), daemon=True, name="metrics-sampler")
+        _sampler_thread.start()
 
 
 
