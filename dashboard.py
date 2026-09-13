@@ -148,7 +148,9 @@ def start_metrics_sampler(interval_s: int = 60) -> None:
     global _sampler_thread
     with _sampler_lock:
         if _sampler_thread is not None:
-            return
+            if _sampler_thread.is_alive():
+                return
+            _sampler_thread = None
         _sampler_stop.clear()
         _sampler_thread = threading.Thread(
             target=_sampler_loop, args=(interval_s,), daemon=True, name="metrics-sampler")

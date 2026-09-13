@@ -20,6 +20,7 @@ episodes.jsonl
 notes.json
 hypotheses.json
 dream_log.jsonl
+metrics_history.jsonl
 schedule.json
 staged_tools.json
 tools_test_report.json

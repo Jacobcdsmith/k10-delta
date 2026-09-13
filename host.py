@@ -429,6 +429,7 @@ def _do_shutdown(state: HostState):
     state.dream.ping()
     state.chrono.stop()
     state.engine.stop()
+    _tool_call_pool.shutdown(wait=False, cancel_futures=True)
     stop_dashboard()
     save_soul(state.soul)
     log.info("Shutdown complete.")
