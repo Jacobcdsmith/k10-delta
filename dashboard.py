@@ -35,6 +35,7 @@ def _get_dashboard_host() -> str:
 METRICS_HISTORY_PATH = Path(__file__).parent / "metrics_history.jsonl"
 _metrics_hist_lock = threading.Lock()
 _sampler_lock = threading.Lock()
+_sampler_stop = threading.Event()
 MAX_HISTORY_ROWS = 20000  # ~2 weeks at 60s resolution
 _sampler_thread: threading.Thread | None = None
 
@@ -133,12 +134,14 @@ def _compute_metrics_snapshot() -> dict | None:
 
 
 def _sampler_loop(interval_s: int) -> None:
-    while True:
+    global _sampler_thread
+    while not _sampler_stop.is_set():
         sample = _compute_metrics_snapshot()
         if sample is not None:
             _append_metrics_sample(sample)
-        import time as _t
-        _t.sleep(interval_s)
+        _sampler_stop.wait(interval_s)
+    with _sampler_lock:
+        _sampler_thread = None
 
 
 def start_metrics_sampler(interval_s: int = 60) -> None:
@@ -146,9 +149,17 @@ def start_metrics_sampler(interval_s: int = 60) -> None:
     with _sampler_lock:
         if _sampler_thread is not None:
             return
+        _sampler_stop.clear()
         _sampler_thread = threading.Thread(
             target=_sampler_loop, args=(interval_s,), daemon=True, name="metrics-sampler")
         _sampler_thread.start()
+
+
+def stop_metrics_sampler() -> None:
+    _sampler_stop.set()
+    thread = _sampler_thread
+    if thread is not None:
+        thread.join(timeout=2)
 
 
 
@@ -821,3 +832,16 @@ def start_dashboard(port: int = DEFAULT_PORT) -> str:
     url = f"http://{host}:{chosen}"
     log.info("Dashboard UI at %s", url)
     return url
+
+
+def stop_dashboard() -> None:
+    global _server, _thread, _active_port
+    stop_metrics_sampler()
+    if _server is not None:
+        _server.shutdown()
+        _server.server_close()
+    if _thread is not None:
+        _thread.join(timeout=2)
+    _server = None
+    _thread = None
+    _active_port = None

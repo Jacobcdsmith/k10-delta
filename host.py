@@ -62,7 +62,7 @@ from tools import kairos_ns
 from tools import ide_ns
 from goals import GoalStore, GOALS_PATH
 import supabase_sync
-from dashboard import configure as configure_dashboard, start_dashboard
+from dashboard import configure as configure_dashboard, start_dashboard, stop_dashboard
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -429,6 +429,7 @@ def _do_shutdown(state: HostState):
     state.dream.ping()
     state.chrono.stop()
     state.engine.stop()
+    stop_dashboard()
     save_soul(state.soul)
     log.info("Shutdown complete.")
 
@@ -593,6 +594,8 @@ def run():
     log.info("=== K10-Δ Host v6.0 — boot #%d ===", state.soul["boot_count"])
     reconnect_attempt = 0
     while not shutdown_requested.is_set():
+        with _ws_health_lock:
+            prior_connect_count = _ws_health.get("connect_count", 0)
         try:
             _run_ws(state)
             if shutdown_requested.is_set():
@@ -601,11 +604,13 @@ def run():
             if shutdown_requested.is_set():
                 break
             with _ws_health_lock:
+                connect_count = _ws_health.get("connect_count", 0)
                 last_connect_ts = _ws_health.get("last_connect_ts")
                 _ws_health["disconnect_count"] += 1
                 _ws_health["last_disconnect_ts"] = time.time()
                 _ws_health["last_disconnect_reason"] = str(e)[:300]
-            if last_connect_ts and time.time() - last_connect_ts >= max(PING_INTERVAL, RECONNECT_WAIT):
+            connected_this_run = connect_count > prior_connect_count
+            if connected_this_run and last_connect_ts and time.time() - last_connect_ts >= max(PING_INTERVAL, RECONNECT_WAIT):
                 reconnect_attempt = 0
             # Exponential backoff with jitter
             import random

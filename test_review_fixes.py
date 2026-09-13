@@ -1,6 +1,8 @@
 import json
+import os
 import tempfile
 import unittest
+import urllib.request
 from pathlib import Path
 
 import dashboard
@@ -92,6 +94,46 @@ class TestReviewFixes(unittest.TestCase):
         finally:
             dashboard._ctx = original_ctx
             dashboard._build_status_payload = original_builder
+
+    def test_dashboard_lite_endpoint_returns_lightweight_payload(self):
+        original_ctx = dashboard._ctx
+        original_host = os.environ.get("K10_DASHBOARD_HOST")
+        dashboard.stop_dashboard()
+        try:
+            os.environ["K10_DASHBOARD_HOST"] = "127.0.0.1"
+            dashboard._ctx = dashboard.DashboardContext()
+            dashboard._ctx.soul = {
+                "boot_count": 7,
+                "semantic": {
+                    "trajectory": {"label": "ready"},
+                    "tool_usage": {"error_tools": ["sensor.poll", "net.search"]},
+                },
+            }
+            dashboard._ctx.read_episodes = lambda n: [{"i": 1}]
+            dashboard._ctx.goals = type(
+                "GoalsStub",
+                (),
+                {
+                    "list_all": lambda self, status=None: (
+                        [1] if status == "open" else [1, 2] if status == "active" else []
+                    )
+                },
+            )()
+            url = dashboard.start_dashboard(8765)
+            with urllib.request.urlopen(f"{url}/api/status/lite", timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(payload["boot_count"], 7)
+            self.assertEqual(payload["episode_count"], 1)
+            self.assertEqual(payload["active_goals"], 3)
+            self.assertEqual(payload["trajectory"]["label"], "ready")
+            self.assertEqual(payload["tool_usage"]["error_tool_count"], 2)
+        finally:
+            dashboard.stop_dashboard()
+            if original_host is None:
+                os.environ.pop("K10_DASHBOARD_HOST", None)
+            else:
+                os.environ["K10_DASHBOARD_HOST"] = original_host
+            dashboard._ctx = original_ctx
 
 
 if __name__ == "__main__":
