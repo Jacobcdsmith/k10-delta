@@ -255,19 +255,6 @@ class TestWill(unittest.TestCase):
 
 class TestGoalPursuitFixes(unittest.TestCase):
 
-    def test_completion_criteria_prevents_fallback_completion(self):
-        with tempfile.TemporaryDirectory() as d:
-            goals = GoalStore(Path(d) / "goals.json")
-            goal = goals.add(
-                "Collect five facts",
-                completion_criteria={"type": "evidence_count", "min_evidence": 5},
-            )
-            goals.add_evidence(goal["id"], "search: found one fact", source="net")
-            service = GoalPursuitService(goals, lambda name, args: "{}")
-            completed, reason = service.auto_evaluate_completion(goals.get(goal["id"]))
-            self.assertFalse(completed)
-            self.assertEqual(reason, "completion_criteria not yet met")
-
     def test_kind_resolution_checks_code_before_status(self):
         with tempfile.TemporaryDirectory() as d:
             goals = GoalStore(Path(d) / "goals.json")

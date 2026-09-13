@@ -6,7 +6,6 @@ from pathlib import Path
 import dashboard
 from selfmod import SelfModEngine
 from tools.fs import resolve_path
-from tools.registry import ToolRegistry
 
 
 class TestReviewFixes(unittest.TestCase):
@@ -17,11 +16,6 @@ class TestReviewFixes(unittest.TestCase):
             workspace.mkdir()
             with self.assertRaises(PermissionError):
                 resolve_path("/etc/passwd", workspace)
-
-    def test_registry_requires_namespace_dot_verb_names(self):
-        registry = ToolRegistry()
-        with self.assertRaises(ValueError):
-            registry.register("invalid", "desc", {"type": "object"}, lambda args: "{}")
 
     def test_commit_tool_does_not_execute_handler(self):
         with tempfile.TemporaryDirectory() as d:

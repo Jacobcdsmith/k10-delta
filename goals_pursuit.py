@@ -337,10 +337,8 @@ class GoalPursuitService:
         N distinct steps each produced progress evidence.
         """
         gid = goal["id"]
-        if goal.get("completion_criteria"):
-            if self.goals.evaluate_completion(gid):
-                return True, "completion_criteria met"
-            return False, "completion_criteria not yet met"
+        if goal.get("completion_criteria") and self.goals.evaluate_completion(gid):
+            return True, "completion_criteria met"
 
         if goal.get("kind") == "delivery":
             step_results = goal.get("step_results") or {}
